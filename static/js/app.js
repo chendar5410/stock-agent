@@ -2,12 +2,12 @@
 "use strict";
 
 const API = {
-  chart:   (t, m, p) => `/api/valuation/chart?ticker=${t}&metric=${m}&period=${p}`,
-  compare: (ts, m, p) => `/api/valuation/compare?tickers=${encodeURIComponent(ts)}&metric=${m}&period=${p}`,
+  chart:   (t, m, p) => `/api/valuation/chart?ticker=${encodeURIComponent(t)}&metric=${encodeURIComponent(m)}&period=${encodeURIComponent(p)}`,
+  compare: (ts, m, p) => `/api/valuation/compare?tickers=${encodeURIComponent(ts)}&metric=${encodeURIComponent(m)}&period=${encodeURIComponent(p)}`,
   wlList:  () => `/api/watchlist`,
   wlAdd:   () => `/api/watchlist/add`,
   wlDel:   (t) => `/api/watchlist/remove/${t}`,
-  wlRank:  (m, p) => `/api/watchlist/ranked?metric=${m}&period=${p}`,
+  wlRank:  (m, p) => `/api/watchlist/ranked?metric=${encodeURIComponent(m)}&period=${encodeURIComponent(p)}`,
 };
 
 const PLOTLY_CFG = { responsive: true, displayModeBar: false };
@@ -15,10 +15,30 @@ const PLOTLY_CFG = { responsive: true, displayModeBar: false };
 // Mirrors the server-side _TICKER_RE in data_fetcher.py
 const TICKER_RE = /^[A-Z0-9.\-]{1,10}$/;
 
+// Mirrors VALID_METRICS in data_fetcher.py
+const VALID_METRICS = new Set(["trailing_pe", "price_sales"]);
+
+// Mirrors VALID_PERIODS in data_fetcher.py
+const VALID_PERIODS = new Set(["1y", "2y", "3y", "5y", "10y"]);
+
 function validateTicker(t) {
   if (!t) return "Ticker symbol cannot be empty.";
   if (!TICKER_RE.test(t)) {
     return `'${t}' is not a valid ticker symbol. Use only letters, digits, dots, or hyphens (max 10 characters).`;
+  }
+  return null;
+}
+
+function validateMetric(m) {
+  if (!VALID_METRICS.has(m)) {
+    return `'${m}' is not a supported metric. Choose from: ${[...VALID_METRICS].join(", ")}.`;
+  }
+  return null;
+}
+
+function validatePeriod(p) {
+  if (!VALID_PERIODS.has(p)) {
+    return `'${p}' is not a valid period. Choose from: ${[...VALID_PERIODS].join(", ")}.`;
   }
   return null;
 }
@@ -50,16 +70,20 @@ async function apiFetch(url) {
   return r.json();
 }
 
-// Strict response-contract check. If the server somehow returns 200 but with
-// missing or degenerate fields, treat it as an error rather than attempting
-// to render. This is the last line of defense before any Plotly call.
+// Hard contract checks — reject degenerate payloads before any Plotly call.
 function assertSinglePayload(data, symbol) {
   if (!data || typeof data !== "object")
     throw new Error(`No data returned for ${symbol}.`);
   if (typeof data.current !== "number" || !isFinite(data.current))
-    throw new Error(`Invalid data returned for ${symbol}: no current value.`);
+    throw new Error(`Invalid response for ${symbol}: missing current value.`);
   if (!data.chart)
     throw new Error(`No chart payload returned for ${symbol}.`);
+  if (typeof data.metric !== "string" || !data.metric)
+    throw new Error(`Response missing metric field for ${symbol}.`);
+  if (typeof data.period !== "string" || !data.period)
+    throw new Error(`Response missing period field for ${symbol}.`);
+  if (typeof data.points !== "number" || data.points < 1)
+    throw new Error(`Response has no data points for ${symbol}.`);
 }
 
 function assertComparePayload(data) {
@@ -99,6 +123,7 @@ const singleTicker  = document.getElementById("single-ticker");
 const singleMetric  = document.getElementById("single-metric");
 const singlePeriod  = document.getElementById("single-period");
 const singleStatus  = document.getElementById("single-status");
+const singleDebug   = document.getElementById("single-debug");
 const chartDiv      = document.getElementById("chart-div");
 const summaryBox    = document.getElementById("summary-box");
 const summaryText   = document.getElementById("summary-text");
@@ -106,41 +131,69 @@ const statPills     = document.getElementById("stat-pills");
 const zscoreBarWrap = document.getElementById("zscore-bar-wrap");
 
 // Unconditionally destroy every piece of single-chart output.
-// Called as the very first action on every submit so nothing from a previous
-// successful render can survive any error path (client-side or server-side).
 function clearSingleChart() {
   Plotly.purge(chartDiv);
   chartDiv.innerHTML = "";
-  zscoreBarWrap.style.display = "none";   // sibling of summary-box — must be hidden separately
+  zscoreBarWrap.style.display = "none";
   summaryBox.style.display = "none";
   summaryText.innerHTML = "";
   statPills.innerHTML = "";
+  singleDebug.style.display = "none";
+  singleDebug.textContent = "";
 }
 
 singleForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const ticker = singleTicker.value.trim().toUpperCase();
 
-  // Wipe stale output unconditionally — before any early-return path.
+  // Read values directly from the DOM elements at submit time.
+  const ticker = singleTicker.value.trim().toUpperCase();
+  const metric = singleMetric.value;
+  const period = singlePeriod.value;
+
+  // Wipe stale output unconditionally before any early-return path.
   clearSingleChart();
   hideStatus(singleStatus);
 
+  // Client-side validation — mirrors server-side checks.
   const tickerErr = validateTicker(ticker);
-  if (tickerErr) {
-    showStatus(singleStatus, "error", tickerErr);
-    return;
-  }
+  if (tickerErr) { showStatus(singleStatus, "error", tickerErr); return; }
 
-  showStatus(singleStatus, "loading", `Fetching ${ticker}…`);
+  const metricErr = validateMetric(metric);
+  if (metricErr) { showStatus(singleStatus, "error", metricErr); return; }
+
+  const periodErr = validatePeriod(period);
+  if (periodErr) { showStatus(singleStatus, "error", periodErr); return; }
+
+  showStatus(singleStatus, "loading", `Fetching ${ticker} — ${metric} — ${period}…`);
 
   try {
-    const data = await apiFetch(API.chart(ticker, singleMetric.value, singlePeriod.value));
+    const url = API.chart(ticker, metric, period);
+    const data = await apiFetch(url);
+
     // Hard contract check — never render a degenerate payload.
     assertSinglePayload(data, ticker);
+
+    // Verify the server actually computed what was requested.
+    if (data.metric !== metric) {
+      throw new Error(
+        `Metric mismatch: requested '${metric}' but server returned '${data.metric}'.`
+      );
+    }
+    if (data.period !== period) {
+      throw new Error(
+        `Period mismatch: requested '${period}' but server returned '${data.period}'.`
+      );
+    }
+
     hideStatus(singleStatus);
+
+    // Show debug line with exactly what was computed.
+    singleDebug.textContent =
+      `${data.symbol} | ${data.metric} | ${data.period} | ${data.points} pts`;
+    singleDebug.style.display = "block";
+
     renderSingleChart(data);
   } catch (err) {
-    // Clear again in case anything changed during the async call, then show error.
     clearSingleChart();
     showStatus(singleStatus, "error", err.message);
   }
@@ -181,22 +234,28 @@ const compareTickers = document.getElementById("compare-tickers");
 const compareMetric  = document.getElementById("compare-metric");
 const comparePeriod  = document.getElementById("compare-period");
 const compareStatus  = document.getElementById("compare-status");
+const compareDebug   = document.getElementById("compare-debug");
 const compareDiv     = document.getElementById("compare-div");
 const compareTable   = document.getElementById("compare-table");
 
-// Unconditionally destroy all compare output.
 function clearCompareChart() {
   Plotly.purge(compareDiv);
   compareDiv.innerHTML = "";
   compareTable.innerHTML = "";
+  compareDebug.style.display = "none";
+  compareDebug.textContent = "";
 }
 
 compareForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+
+  // Read values directly from the DOM elements at submit time.
+  const metric = compareMetric.value;
+  const period = comparePeriod.value;
   const rawTickers = compareTickers.value
     .split(",").map(t => t.trim().toUpperCase()).filter(Boolean);
 
-  // Wipe stale output unconditionally — before any early-return path.
+  // Wipe stale output unconditionally before any early-return path.
   clearCompareChart();
   hideStatus(compareStatus);
 
@@ -204,28 +263,45 @@ compareForm.addEventListener("submit", async (e) => {
     showStatus(compareStatus, "error", "Please enter at least one ticker.");
     return;
   }
+
+  const metricErr = validateMetric(metric);
+  if (metricErr) { showStatus(compareStatus, "error", metricErr); return; }
+
+  const periodErr = validatePeriod(period);
+  if (periodErr) { showStatus(compareStatus, "error", periodErr); return; }
+
   const tickerErrors = rawTickers.map(t => validateTicker(t)).filter(Boolean);
   if (tickerErrors.length) {
     showStatus(compareStatus, "error", tickerErrors[0]);
     return;
   }
 
-  showStatus(compareStatus, "loading", "Loading comparison…");
+  showStatus(compareStatus, "loading",
+    `Comparing ${rawTickers.join(", ")} — ${metric} — ${period}…`);
 
   try {
-    const data = await apiFetch(
-      API.compare(rawTickers.join(","), compareMetric.value, comparePeriod.value)
-    );
-    // Hard contract check — never render a degenerate payload.
+    const url = API.compare(rawTickers.join(","), metric, period);
+    const data = await apiFetch(url);
+
     assertComparePayload(data);
+
     hideStatus(compareStatus);
+
     if (data.errors?.length) {
       showStatus(compareStatus, "error", "Skipped: " + data.errors.join(" | "));
       compareStatus.style.display = "";
     }
+
+    // Debug line: list all tickers, the metric, period, and per-ticker point counts.
+    const ptsSummary = data.results
+      .map(r => `${r.symbol}:${r.points}pts`)
+      .join(", ");
+    compareDebug.textContent =
+      `${rawTickers.join(", ")} | ${data.metric} | ${data.period} | ${ptsSummary}`;
+    compareDebug.style.display = "block";
+
     renderCompareChart(data);
   } catch (err) {
-    // Clear again after async, then show error.
     clearCompareChart();
     showStatus(compareStatus, "error", err.message);
   }
@@ -275,10 +351,7 @@ const wlEmpty     = document.getElementById("wl-empty");
 wlAddBtn.addEventListener("click", async () => {
   const t = wlAddInput.value.trim().toUpperCase();
   const tickerErr = validateTicker(t);
-  if (tickerErr) {
-    showStatus(wlStatus, "error", tickerErr);
-    return;
-  }
+  if (tickerErr) { showStatus(wlStatus, "error", tickerErr); return; }
   try {
     await fetch(API.wlAdd(), {
       method: "POST",

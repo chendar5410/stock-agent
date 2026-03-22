@@ -7,9 +7,10 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.services.chart_builder import build_compare_charts, build_single_chart
 from app.services.data_fetcher import (
+    VALID_METRICS,
     VALID_PERIODS,
-    MetricKey,
     fetch_valuation_series,
+    validate_metric,
     validate_period,
     validate_ticker,
 )
@@ -21,15 +22,19 @@ logger = logging.getLogger(__name__)
 @router.get("/chart")
 async def get_valuation_chart(
     ticker: str = Query(..., description="Stock ticker symbol, e.g. AAPL"),
-    metric: MetricKey = Query("forward_pe", description="Valuation metric"),
+    metric: str = Query(
+        "trailing_pe",
+        description=f"Valuation metric — one of: {', '.join(sorted(VALID_METRICS))}",
+    ),
     period: str = Query(
-        "5y", description=f"Time period — one of: {', '.join(sorted(VALID_PERIODS))}"
+        "5y",
+        description=f"Time period — one of: {', '.join(sorted(VALID_PERIODS))}",
     ),
 ):
     """Return chart JSON and analytics for a single ticker."""
-    # Validate inputs before touching yfinance
     try:
         validate_ticker(ticker)
+        validate_metric(metric)
         validate_period(period)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -37,37 +42,42 @@ async def get_valuation_chart(
     try:
         data = fetch_valuation_series(ticker, metric, period)
     except ValueError as exc:
-        # Known data-availability problem — surface as 422 with the exact reason
         logger.warning("Data unavailable for %s/%s/%s: %s", ticker, metric, period, exc)
         raise HTTPException(status_code=422, detail=str(exc))
     except RuntimeError as exc:
-        logger.error("Runtime error for %s/%s: %s", ticker, metric, exc)
+        logger.error("Runtime error for %s/%s/%s: %s", ticker, metric, period, exc)
         raise HTTPException(status_code=500, detail=str(exc))
     except Exception as exc:
-        logger.exception("Unexpected error for %s/%s", ticker, metric)
+        logger.exception("Unexpected error for %s/%s/%s", ticker, metric, period)
         raise HTTPException(status_code=500, detail=f"Unexpected server error: {exc}")
 
     chart_json = build_single_chart(data)
     return {
         "chart": chart_json,
-        "summary": data["summary"],
-        "zscore": data["zscore"],
-        "current": data["current"],
-        "stats": data["stats"],
         "symbol": data["symbol"],
-        "label": data["label"],
+        "metric": data["metric"],      # exact metric key that was computed
+        "label": data["label"],        # human-readable label used in the chart title
+        "period": data["period"],      # exact period that was used
+        "points": data["points"],      # number of data points in the returned series
+        "current": data["current"],
+        "zscore": data["zscore"],
+        "stats": data["stats"],
+        "summary": data["summary"],
     }
 
 
 @router.get("/compare")
 async def get_compare_charts(
     tickers: str = Query(..., description="Comma-separated list of tickers (max 6)"),
-    metric: MetricKey = Query("forward_pe"),
+    metric: str = Query(
+        "trailing_pe",
+        description=f"Valuation metric — one of: {', '.join(sorted(VALID_METRICS))}",
+    ),
     period: str = Query("5y"),
 ):
     """Return stacked valuation charts for multiple tickers."""
-    # Validate period first
     try:
+        validate_metric(metric)
         validate_period(period)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -76,9 +86,8 @@ async def get_compare_charts(
     if not raw:
         raise HTTPException(status_code=422, detail="No tickers provided.")
     if len(raw) > 6:
-        raise HTTPException(status_code=422, detail="Maximum 6 tickers allowed in compare mode.")
+        raise HTTPException(status_code=422, detail="Maximum 6 tickers for compare mode.")
 
-    # Validate all ticker symbols upfront; reject the whole request on any invalid input
     symbols: list[str] = []
     format_errors: list[str] = []
     for sym in raw:
@@ -89,14 +98,13 @@ async def get_compare_charts(
     if format_errors:
         raise HTTPException(status_code=422, detail=" | ".join(format_errors))
 
-    # Fetch data; collect per-ticker errors but keep valid results
     results: list[dict] = []
     errors: list[str] = []
     for sym in symbols:
         try:
             results.append(fetch_valuation_series(sym, metric, period))
         except (ValueError, RuntimeError) as exc:
-            logger.warning("Skipping %s in compare mode: %s", sym, exc)
+            logger.warning("Skipping %s in compare: %s", sym, exc)
             errors.append(f"{sym}: {exc}")
         except Exception as exc:
             logger.exception("Unexpected error for %s in compare", sym)
@@ -114,10 +122,15 @@ async def get_compare_charts(
     chart_json = build_compare_charts(results)
     return {
         "chart": chart_json,
+        "metric": metric,
+        "period": period,
         "results": [
             {
                 "symbol": d["symbol"],
                 "label": d["label"],
+                "metric": d["metric"],
+                "period": d["period"],
+                "points": d["points"],
                 "current": d["current"],
                 "zscore": d["zscore"],
                 "summary": d["summary"],

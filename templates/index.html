@@ -7,8 +7,21 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/css/style.css" />
-  <!-- Plotly CDN -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" crossorigin="anonymous"></script>
+  <style>
+    .debug-line {
+      display: none;
+      font-family: monospace;
+      font-size: 11px;
+      color: #8b949e;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 4px;
+      padding: 5px 10px;
+      margin: 6px 0 0 0;
+      letter-spacing: 0.02em;
+    }
+  </style>
 </head>
 <body>
 <div class="app-wrapper">
@@ -39,9 +52,7 @@
         <div class="ctrl-group">
           <label for="single-metric">Metric</label>
           <select id="single-metric">
-            <option value="forward_pe" selected>Forward P/E</option>
-            <option value="trailing_pe">Trailing P/E</option>
-            <option value="ev_ebitda">EV/EBITDA</option>
+            <option value="trailing_pe" selected>Trailing P/E</option>
             <option value="price_sales">Price/Sales</option>
           </select>
         </div>
@@ -61,6 +72,8 @@
       </form>
 
       <div id="single-status" class="status"></div>
+      <!-- Debug line: shows exactly what was requested and returned -->
+      <div id="single-debug" class="debug-line"></div>
 
       <div class="chart-wrap">
         <div id="chart-div"></div>
@@ -75,7 +88,6 @@
                #e3b341 35%, #e3b341 50%,
                #e3b341 65%,
                #f78166 78%, #f78166 100%);">
-          <!-- tick marks at -2, -1, 0, +1, +2 sigma -->
           <div class="tick" style="left:8.33%"  title="-2σ"></div>
           <div class="tick" style="left:25%"    title="-1σ"></div>
           <div class="tick" style="left:50%"    title="0"></div>
@@ -111,9 +123,7 @@
         <div class="ctrl-group">
           <label for="compare-metric">Metric</label>
           <select id="compare-metric">
-            <option value="forward_pe" selected>Forward P/E</option>
-            <option value="trailing_pe">Trailing P/E</option>
-            <option value="ev_ebitda">EV/EBITDA</option>
+            <option value="trailing_pe" selected>Trailing P/E</option>
             <option value="price_sales">Price/Sales</option>
           </select>
         </div>
@@ -133,6 +143,8 @@
       </form>
 
       <div id="compare-status" class="status"></div>
+      <!-- Debug line for compare -->
+      <div id="compare-debug" class="debug-line"></div>
 
       <div class="chart-wrap">
         <div id="compare-div"></div>
@@ -159,9 +171,7 @@
         <div class="ctrl-group">
           <label for="wl-metric">Metric</label>
           <select id="wl-metric">
-            <option value="forward_pe" selected>Forward P/E</option>
-            <option value="trailing_pe">Trailing P/E</option>
-            <option value="ev_ebitda">EV/EBITDA</option>
+            <option value="trailing_pe" selected>Trailing P/E</option>
             <option value="price_sales">Price/Sales</option>
           </select>
         </div>
@@ -210,6 +220,6 @@
   </main>
 </div>
 
-<script src="/static/js/app.js?v=3"></script>
+<script src="/static/js/app.js?v=4"></script>
 </body>
 </html>
