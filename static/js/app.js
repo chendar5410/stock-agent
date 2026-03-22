@@ -82,10 +82,26 @@ const chartDiv     = document.getElementById("chart-div");
 const summaryBox   = document.getElementById("summary-box");
 const summaryText  = document.getElementById("summary-text");
 const statPills    = document.getElementById("stat-pills");
+const zscoreBarWrap = document.getElementById("zscore-bar-wrap");
+
+// Wipe all single-chart output. Called before every request AND on every
+// validation error so stale results can never survive a failed submission.
+function clearSingleChart() {
+  Plotly.purge(chartDiv);
+  chartDiv.innerHTML = "";
+  summaryBox.style.display = "none";
+  summaryText.innerHTML = "";
+  statPills.innerHTML = "";
+  zscoreBarWrap.style.display = "none";
+}
 
 singleForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const ticker = singleTicker.value.trim().toUpperCase();
+
+  // Clear stale results unconditionally — before any early return path.
+  clearSingleChart();
+
   const tickerErr = validateTicker(ticker);
   if (tickerErr) {
     showStatus(singleStatus, "error", tickerErr);
@@ -93,8 +109,6 @@ singleForm.addEventListener("submit", async (e) => {
   }
 
   showStatus(singleStatus, "loading", `Fetching ${ticker}…`);
-  chartDiv.innerHTML = "";
-  summaryBox.style.display = "none";
 
   try {
     const data = await apiFetch(API.chart(ticker, singleMetric.value, singlePeriod.value));
@@ -147,10 +161,22 @@ const compareStatus  = document.getElementById("compare-status");
 const compareDiv     = document.getElementById("compare-div");
 const compareTable   = document.getElementById("compare-table");
 
+// Wipe all compare output. Called before every request AND on every
+// validation error so stale charts and tables never survive a failed submission.
+function clearCompareChart() {
+  Plotly.purge(compareDiv);
+  compareDiv.innerHTML = "";
+  compareTable.innerHTML = "";
+}
+
 compareForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const rawTickers = compareTickers.value
     .split(",").map(t => t.trim().toUpperCase()).filter(Boolean);
+
+  // Clear stale results unconditionally — before any early return path.
+  clearCompareChart();
+
   if (!rawTickers.length) {
     showStatus(compareStatus, "error", "Please enter at least one ticker.");
     return;
@@ -161,11 +187,12 @@ compareForm.addEventListener("submit", async (e) => {
     return;
   }
   showStatus(compareStatus, "loading", "Loading comparison…");
-  compareDiv.innerHTML = "";
-  compareTable.innerHTML = "";
 
   try {
-    const data = await apiFetch(API.compare(tickers, compareMetric.value, comparePeriod.value));
+    // rawTickers.join(",") — fixes the Phase-1 bug where the old variable
+    // name 'tickers' (now renamed 'rawTickers') was left in this call, causing
+    // a ReferenceError on every compare request.
+    const data = await apiFetch(API.compare(rawTickers.join(","), compareMetric.value, comparePeriod.value));
     hideStatus(compareStatus);
     if (data.errors?.length) {
       showStatus(compareStatus, "error", "Skipped: " + data.errors.join(" | "));
