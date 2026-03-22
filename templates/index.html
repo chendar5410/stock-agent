@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Valuation Chart Tool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <!-- Plotly CDN -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div class="app-wrapper">
+
+  <!-- ── header ─────────────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">ValuationChart <span>/ Historical Valuation Analysis</span></div>
+    <nav>
+      <button class="active" data-panel="panel-single">Single Chart</button>
+      <button data-panel="panel-compare">Compare</button>
+      <button data-panel="panel-watchlist">Watchlist</button>
+    </nav>
+  </header>
+
+  <!-- ── main ──────────────────────────────────────────────────────── -->
+  <main>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         PANEL: Single Chart
+    ══════════════════════════════════════════════════════════════════ -->
+    <div id="panel-single" class="panel active">
+
+      <form id="single-form" class="controls" autocomplete="off">
+        <div class="ctrl-group">
+          <label for="single-ticker">Ticker</label>
+          <input id="single-ticker" type="text" placeholder="e.g. AAPL" maxlength="10" />
+        </div>
+        <div class="ctrl-group">
+          <label for="single-metric">Metric</label>
+          <select id="single-metric">
+            <option value="forward_pe" selected>Forward P/E</option>
+            <option value="trailing_pe">Trailing P/E</option>
+            <option value="ev_ebitda">EV/EBITDA</option>
+            <option value="price_sales">Price/Sales</option>
+          </select>
+        </div>
+        <div class="ctrl-group">
+          <label for="single-period">Period</label>
+          <select id="single-period">
+            <option value="1y">1 Year</option>
+            <option value="2y">2 Years</option>
+            <option value="3y">3 Years</option>
+            <option value="5y" selected>5 Years</option>
+            <option value="10y">10 Years</option>
+          </select>
+        </div>
+        <div class="ctrl-group" style="justify-content:flex-end">
+          <button type="submit" class="btn">Fetch Chart</button>
+        </div>
+      </form>
+
+      <div id="single-status" class="status"></div>
+
+      <div class="chart-wrap">
+        <div id="chart-div"></div>
+      </div>
+
+      <!-- z-score gauge bar -->
+      <div id="zscore-bar-wrap" class="zscore-bar-wrap" style="display:none">
+        <div class="zscore-bar-title">Valuation Gauge (relative to history)</div>
+        <div class="zscore-bar" style="position:relative;height:8px;border-radius:4px;
+             background: linear-gradient(to right,
+               #3fb950 0%, #3fb950 22%,
+               #e3b341 35%, #e3b341 50%,
+               #e3b341 65%,
+               #f78166 78%, #f78166 100%);">
+          <!-- tick marks at -2, -1, 0, +1, +2 sigma -->
+          <div class="tick" style="left:8.33%"  title="-2σ"></div>
+          <div class="tick" style="left:25%"    title="-1σ"></div>
+          <div class="tick" style="left:50%"    title="0"></div>
+          <div class="tick" style="left:75%"    title="+1σ"></div>
+          <div class="tick" style="left:91.67%" title="+2σ"></div>
+          <div id="zscore-marker" class="zscore-marker" style="left:50%"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:#8b949e">
+          <span>−3σ Cheap</span><span>−2σ</span><span>−1σ</span>
+          <span>Mean</span><span>+1σ</span><span>+2σ</span><span>+3σ Expensive</span>
+        </div>
+      </div>
+
+      <!-- summary / stats -->
+      <div id="summary-box" class="summary-box" style="display:none">
+        <p id="summary-text" class="summary-text"></p>
+        <div id="stat-pills" class="stat-pills"></div>
+      </div>
+
+    </div><!-- /panel-single -->
+
+
+    <!-- ══════════════════════════════════════════════════════════════
+         PANEL: Compare
+    ══════════════════════════════════════════════════════════════════ -->
+    <div id="panel-compare" class="panel">
+
+      <form id="compare-form" class="controls" autocomplete="off">
+        <div class="ctrl-group">
+          <label for="compare-tickers">Tickers (comma-separated, max 6)</label>
+          <input id="compare-tickers" type="text" placeholder="e.g. AAPL, MSFT, GOOGL" style="min-width:280px" />
+        </div>
+        <div class="ctrl-group">
+          <label for="compare-metric">Metric</label>
+          <select id="compare-metric">
+            <option value="forward_pe" selected>Forward P/E</option>
+            <option value="trailing_pe">Trailing P/E</option>
+            <option value="ev_ebitda">EV/EBITDA</option>
+            <option value="price_sales">Price/Sales</option>
+          </select>
+        </div>
+        <div class="ctrl-group">
+          <label for="compare-period">Period</label>
+          <select id="compare-period">
+            <option value="1y">1 Year</option>
+            <option value="2y">2 Years</option>
+            <option value="3y">3 Years</option>
+            <option value="5y" selected>5 Years</option>
+            <option value="10y">10 Years</option>
+          </select>
+        </div>
+        <div class="ctrl-group" style="justify-content:flex-end">
+          <button type="submit" class="btn">Compare</button>
+        </div>
+      </form>
+
+      <div id="compare-status" class="status"></div>
+
+      <div class="chart-wrap">
+        <div id="compare-div"></div>
+      </div>
+
+      <div id="compare-table" style="margin-top:16px"></div>
+
+    </div><!-- /panel-compare -->
+
+
+    <!-- ══════════════════════════════════════════════════════════════
+         PANEL: Watchlist
+    ══════════════════════════════════════════════════════════════════ -->
+    <div id="panel-watchlist" class="panel">
+
+      <div class="watchlist-controls">
+        <div class="ctrl-group">
+          <label for="wl-add-input">Add Ticker</label>
+          <div style="display:flex;gap:8px">
+            <input id="wl-add-input" type="text" placeholder="e.g. NVDA" maxlength="10" />
+            <button id="wl-add-btn" class="btn">+ Add</button>
+          </div>
+        </div>
+        <div class="ctrl-group">
+          <label for="wl-metric">Metric</label>
+          <select id="wl-metric">
+            <option value="forward_pe" selected>Forward P/E</option>
+            <option value="trailing_pe">Trailing P/E</option>
+            <option value="ev_ebitda">EV/EBITDA</option>
+            <option value="price_sales">Price/Sales</option>
+          </select>
+        </div>
+        <div class="ctrl-group">
+          <label for="wl-period">Period</label>
+          <select id="wl-period">
+            <option value="1y">1 Year</option>
+            <option value="2y">2 Years</option>
+            <option value="3y">3 Years</option>
+            <option value="5y" selected>5 Years</option>
+            <option value="10y">10 Years</option>
+          </select>
+        </div>
+        <div class="ctrl-group" style="justify-content:flex-end">
+          <button id="wl-refresh" class="btn btn-ghost">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div id="wl-status" class="status"></div>
+
+      <div id="wl-empty" style="display:none;color:#8b949e;padding:24px;text-align:center">
+        Your watchlist is empty. Add tickers above to start tracking valuations.
+      </div>
+
+      <div class="wl-table-wrap">
+        <table class="wl-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Ticker</th>
+              <th>Current</th>
+              <th>Mean</th>
+              <th>Std Dev</th>
+              <th>Z-Score</th>
+              <th>Signal</th>
+              <th>Summary</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="wl-table-body"></tbody>
+        </table>
+      </div>
+
+    </div><!-- /panel-watchlist -->
+
+  </main>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
