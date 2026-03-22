@@ -40,8 +40,92 @@ _TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 
 REQUEST_TIMEOUT = 20  # seconds passed to yfinance history calls
 
+# Keywords yfinance logs when a ticker is unknown or delisted.
+# Captured via _YFLogCapture and checked before trusting the DataFrame.
+_YF_NOT_FOUND = (
+    "no data found",
+    "possibly delisted",
+    "no timezone found",
+    "symbol may be",
+    "no price data found",
+    "data not available",
+    "yf.download() errors",
+)
 
-# ── Input validation ────────────────────────────────────────────────────────
+
+# ── yfinance log capture ─────────────────────────────────────────────────────
+
+class _YFLogCapture(logging.Handler):
+    """
+    Temporary log handler attached to the yfinance logger family.
+
+    yfinance 1.2.x logs messages like:
+        "XYZFAKE: No timezone found, symbol may be delisted"
+        "No data found, symbol may be delisted"
+    when a ticker does not exist. We capture these to raise an explicit
+    ValueError rather than returning an empty DataFrame silently.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage().lower())
+
+    def found_not_found_hint(self) -> bool:
+        return any(
+            keyword in msg
+            for msg in self.messages
+            for keyword in _YF_NOT_FOUND
+        )
+
+
+def _yf_history_safe(ticker: yf.Ticker, days: int) -> pd.DataFrame:
+    """
+    Call ticker.history() while capturing yfinance log output.
+
+    Returns the raw DataFrame. Raises ValueError if yfinance logs any
+    "not found / delisted" message OR if the call itself throws.
+    """
+    capture = _YFLogCapture()
+    yf_loggers = [
+        logging.getLogger("yfinance"),
+        logging.getLogger("yfinance.base"),
+        logging.getLogger("yfinance.utils"),
+        logging.getLogger("yfinance.ticker"),
+    ]
+    for lg in yf_loggers:
+        lg.addHandler(capture)
+
+    hist = pd.DataFrame()
+    exc_caught: Exception | None = None
+    try:
+        hist = ticker.history(period=f"{days}d", auto_adjust=True, timeout=REQUEST_TIMEOUT)
+    except Exception as exc:
+        exc_caught = exc
+    finally:
+        for lg in yf_loggers:
+            lg.removeHandler(capture)
+
+    if exc_caught is not None:
+        raise ValueError(
+            f"Failed to fetch price data for '{ticker.ticker}': {exc_caught}. "
+            "Check your network connection and verify the ticker symbol."
+        ) from exc_caught
+
+    if capture.found_not_found_hint():
+        msgs = " | ".join(capture.messages) if capture.messages else "(no detail)"
+        logger.warning("yfinance not-found hint for %s: %s", ticker.ticker, msgs)
+        raise ValueError(
+            f"Ticker '{ticker.ticker}' was not found. "
+            "The symbol may be invalid, delisted, or not available in this data source."
+        )
+
+    return hist
+
+
+# ── Input validation ─────────────────────────────────────────────────────────
 
 def validate_ticker(symbol: str) -> str:
     """Normalise and validate a ticker symbol. Raises ValueError on bad input."""
@@ -66,7 +150,7 @@ def validate_period(period: str) -> str:
     return period
 
 
-# ── Internal helpers ────────────────────────────────────────────────────────
+# ── Internal helpers ─────────────────────────────────────────────────────────
 
 def _strip_tz(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
     """Remove timezone info from a DatetimeIndex, converting UTC first if needed."""
@@ -78,20 +162,22 @@ def _get_price_history(ticker: yf.Ticker, days: int) -> pd.Series:
     """
     Return daily closing prices for the past `days` days.
 
-    Raises ValueError if the ticker is unknown, delisted, or unreachable.
+    Raises ValueError if the ticker is unknown, delisted, unreachable,
+    or has fewer than 5 trading days of history.
     """
-    try:
-        hist = ticker.history(period=f"{days}d", auto_adjust=True, timeout=REQUEST_TIMEOUT)
-    except Exception as exc:
-        raise ValueError(
-            f"Failed to fetch price data: {exc}. "
-            "Check your network connection and verify the ticker symbol."
-        ) from exc
+    hist = _yf_history_safe(ticker, days)
 
     if hist.empty:
         raise ValueError(
-            "No price history found. The ticker may be invalid, delisted, "
-            "or not yet traded. Please check the symbol and try again."
+            f"No price history returned for '{ticker.ticker}'. "
+            "The symbol may be invalid, delisted, or not yet traded. "
+            "Please check the symbol and try again."
+        )
+
+    if len(hist) < 5:
+        raise ValueError(
+            f"Only {len(hist)} trading day(s) of data found for '{ticker.ticker}'. "
+            "Insufficient history to compute a valuation series."
         )
 
     s = hist["Close"]
@@ -132,12 +218,7 @@ def _row(fin: pd.DataFrame, candidates: list[str]) -> pd.Series | None:
 
 
 def _get_shares(ticker: yf.Ticker) -> float:
-    """
-    Return shares outstanding.
-
-    Raises ValueError if unavailable.
-    """
-    # fast_info is cheaper than info
+    """Return shares outstanding. Raises ValueError if unavailable."""
     try:
         fi = ticker.fast_info
         shares = getattr(fi, "shares", None) or getattr(fi, "sharesOutstanding", None)
@@ -160,7 +241,7 @@ def _get_shares(ticker: yf.Ticker) -> float:
     )
 
 
-# ── Quarterly TTM series builders ───────────────────────────────────────────
+# ── Quarterly TTM series builders ────────────────────────────────────────────
 
 def _quarterly_eps_ttm(ticker: yf.Ticker) -> pd.Series:
     """
@@ -204,7 +285,6 @@ def _quarterly_ebitda_ttm(ticker: yf.Ticker) -> pd.Series:
     """
     fin = _get_quarterly_financials(ticker)
 
-    # Attempt 1: direct EBITDA row
     ebitda = _row(fin, ["EBITDA", "Ebitda"])
     if ebitda is not None:
         ttm = ebitda.rolling(4, min_periods=4).sum().dropna()
@@ -212,7 +292,6 @@ def _quarterly_ebitda_ttm(ticker: yf.Ticker) -> pd.Series:
             ttm.index = _strip_tz(pd.to_datetime(ttm.index))
             return ttm
 
-    # Attempt 2: Operating Income + D&A
     ebit = _row(fin, ["Operating Income", "EBIT", "Operating Profit"])
     if ebit is None:
         raise ValueError(
@@ -273,23 +352,20 @@ def _quarterly_revenue_ttm(ticker: yf.Ticker) -> pd.Series:
     return ttm
 
 
-# ── Per-metric series builders ───────────────────────────────────────────────
+# ── Per-metric series builders ────────────────────────────────────────────────
 
 def _forward_eps_series(ticker: yf.Ticker, price: pd.Series) -> pd.Series:
     """
     Build Forward P/E series.
 
     Uses TTM EPS (from quarterly filings) as the historical denominator.
-    If a current forwardEps estimate is available, it overrides the last point
-    to reflect analyst consensus for the current period.
+    If a current forwardEps estimate is available, it overrides the last point.
 
     Raises ValueError if EPS data is unavailable.
     """
     eps_ttm = _quarterly_eps_ttm(ticker)
-
     eps_daily = eps_ttm.reindex(price.index, method="ffill")
 
-    # Override last point with analyst forwardEps if available and positive
     try:
         fwd_eps = ticker.info.get("forwardEps")
         if fwd_eps and float(fwd_eps) > 0:
@@ -310,7 +386,6 @@ def _trailing_pe_series(ticker: yf.Ticker, price: pd.Series) -> pd.Series:
     Raises ValueError if EPS data is unavailable.
     """
     eps_ttm = _quarterly_eps_ttm(ticker)
-
     eps_daily = eps_ttm.reindex(price.index, method="ffill")
     pe = price / eps_daily
     pe = pe.replace([np.inf, -np.inf], np.nan).dropna()
@@ -338,7 +413,6 @@ def _ev_ebitda_series(ticker: yf.Ticker, price: pd.Series) -> pd.Series:
     cash = float(info.get("totalCash") or 0)
 
     ebitda_daily = ebitda_ttm.reindex(price.index, method="ffill")
-
     ev = price * shares + total_debt - cash
     ev_ebitda = ev / ebitda_daily
     ev_ebitda = ev_ebitda.replace([np.inf, -np.inf], np.nan).dropna()
@@ -358,26 +432,23 @@ def _price_sales_series(ticker: yf.Ticker, price: pd.Series) -> pd.Series:
     shares = _get_shares(ticker)
 
     rev_daily = rev_ttm.reindex(price.index, method="ffill")
-
     market_cap = price * shares
     ps = market_cap / rev_daily
     ps = ps.replace([np.inf, -np.inf], np.nan).dropna()
     return ps
 
 
-# ── Series cleaning ──────────────────────────────────────────────────────────
+# ── Series cleaning ───────────────────────────────────────────────────────────
 
 def _clean_series(series: pd.Series, symbol: str, metric: MetricKey) -> pd.Series:
     """
     Remove infinities, NaNs, negative values, and statistical outliers.
 
-    Raises ValueError if fewer than 20 valid data points remain — this usually
-    means the metric is not applicable (e.g. negative earnings throughout).
+    Raises ValueError if fewer than 20 valid data points remain.
     """
     series = series.replace([np.inf, -np.inf], np.nan).dropna()
     series = series[series > 0]
 
-    # Remove values beyond 5× IQR of the 5th–95th percentile range
     q1, q3 = series.quantile(0.05), series.quantile(0.95)
     iqr = q3 - q1
     if iqr > 0:
@@ -395,7 +466,7 @@ def _clean_series(series: pd.Series, symbol: str, metric: MetricKey) -> pd.Serie
     return series
 
 
-# ── Result builder ───────────────────────────────────────────────────────────
+# ── Result builder ────────────────────────────────────────────────────────────
 
 def _build_result(symbol: str, metric: MetricKey, period: str, series: pd.Series) -> dict:
     """Compute statistics and assemble the final response dict."""
@@ -432,7 +503,7 @@ def _build_result(symbol: str, metric: MetricKey, period: str, series: pd.Series
     }
 
 
-# ── Public API ───────────────────────────────────────────────────────────────
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def fetch_valuation_series(
     symbol: str,
@@ -441,9 +512,6 @@ def fetch_valuation_series(
 ) -> dict:
     """
     Fetch and return a historical valuation series for a ticker.
-
-    Validates inputs, fetches live price + fundamental data from yfinance,
-    computes the requested metric, cleans the series, and returns statistics.
 
     Raises:
         ValueError  – invalid input, unknown ticker, unavailable metric,
@@ -474,7 +542,7 @@ def fetch_valuation_series(
         else:
             raise ValueError(f"Unknown metric: '{metric}'.")
     except ValueError:
-        raise  # propagate with original message
+        raise
     except Exception as exc:
         logger.exception("Unexpected error computing %s for %s", metric, symbol)
         raise RuntimeError(
@@ -493,7 +561,7 @@ def fetch_valuation_series(
     return _build_result(symbol, metric, period, series)
 
 
-# ── Summary text ─────────────────────────────────────────────────────────────
+# ── Summary text ──────────────────────────────────────────────────────────────
 
 def _generate_summary(
     symbol: str, label: str, period: str, mean: float, std: float,

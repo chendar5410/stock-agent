@@ -50,6 +50,27 @@ async function apiFetch(url) {
   return r.json();
 }
 
+// Strict response-contract check. If the server somehow returns 200 but with
+// missing or degenerate fields, treat it as an error rather than attempting
+// to render. This is the last line of defense before any Plotly call.
+function assertSinglePayload(data, symbol) {
+  if (!data || typeof data !== "object")
+    throw new Error(`No data returned for ${symbol}.`);
+  if (typeof data.current !== "number" || !isFinite(data.current))
+    throw new Error(`Invalid data returned for ${symbol}: no current value.`);
+  if (!data.chart)
+    throw new Error(`No chart payload returned for ${symbol}.`);
+}
+
+function assertComparePayload(data) {
+  if (!data || typeof data !== "object")
+    throw new Error("No data returned from compare endpoint.");
+  if (!data.chart)
+    throw new Error("No chart payload returned from compare endpoint.");
+  if (!Array.isArray(data.results) || data.results.length === 0)
+    throw new Error("Compare returned no results. All tickers may have failed.");
+}
+
 function showStatus(el, type, msg) {
   el.className = `status ${type}`;
   if (type === "loading") {
@@ -73,34 +94,36 @@ document.querySelectorAll("nav button[data-panel]").forEach(btn => {
 });
 
 // ── SINGLE CHART ──────────────────────────────────────────────────────────
-const singleForm   = document.getElementById("single-form");
-const singleTicker = document.getElementById("single-ticker");
-const singleMetric = document.getElementById("single-metric");
-const singlePeriod = document.getElementById("single-period");
-const singleStatus = document.getElementById("single-status");
-const chartDiv     = document.getElementById("chart-div");
-const summaryBox   = document.getElementById("summary-box");
-const summaryText  = document.getElementById("summary-text");
-const statPills    = document.getElementById("stat-pills");
+const singleForm    = document.getElementById("single-form");
+const singleTicker  = document.getElementById("single-ticker");
+const singleMetric  = document.getElementById("single-metric");
+const singlePeriod  = document.getElementById("single-period");
+const singleStatus  = document.getElementById("single-status");
+const chartDiv      = document.getElementById("chart-div");
+const summaryBox    = document.getElementById("summary-box");
+const summaryText   = document.getElementById("summary-text");
+const statPills     = document.getElementById("stat-pills");
 const zscoreBarWrap = document.getElementById("zscore-bar-wrap");
 
-// Wipe all single-chart output. Called before every request AND on every
-// validation error so stale results can never survive a failed submission.
+// Unconditionally destroy every piece of single-chart output.
+// Called as the very first action on every submit so nothing from a previous
+// successful render can survive any error path (client-side or server-side).
 function clearSingleChart() {
   Plotly.purge(chartDiv);
   chartDiv.innerHTML = "";
+  zscoreBarWrap.style.display = "none";   // sibling of summary-box — must be hidden separately
   summaryBox.style.display = "none";
   summaryText.innerHTML = "";
   statPills.innerHTML = "";
-  zscoreBarWrap.style.display = "none";
 }
 
 singleForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const ticker = singleTicker.value.trim().toUpperCase();
 
-  // Clear stale results unconditionally — before any early return path.
+  // Wipe stale output unconditionally — before any early-return path.
   clearSingleChart();
+  hideStatus(singleStatus);
 
   const tickerErr = validateTicker(ticker);
   if (tickerErr) {
@@ -112,9 +135,13 @@ singleForm.addEventListener("submit", async (e) => {
 
   try {
     const data = await apiFetch(API.chart(ticker, singleMetric.value, singlePeriod.value));
+    // Hard contract check — never render a degenerate payload.
+    assertSinglePayload(data, ticker);
     hideStatus(singleStatus);
     renderSingleChart(data);
   } catch (err) {
+    // Clear again in case anything changed during the async call, then show error.
+    clearSingleChart();
     showStatus(singleStatus, "error", err.message);
   }
 });
@@ -137,19 +164,15 @@ function renderSingleChart(data) {
     <div class="pill"><span class="pill-label">Signal</span><span class="pill-val ${pc}">${label}</span></div>
   `;
   summaryBox.style.display = "flex";
-
-  // z-score bar
   renderZscoreBar(z);
 }
 
 function renderZscoreBar(z) {
-  const wrap = document.getElementById("zscore-bar-wrap");
-  // clamp to [-3, 3]
   const pct = ((Math.max(-3, Math.min(3, z)) + 3) / 6) * 100;
   const color = zColor(z);
   document.getElementById("zscore-marker").style.left = `${pct}%`;
   document.getElementById("zscore-marker").style.background = color;
-  wrap.style.display = "";
+  zscoreBarWrap.style.display = "";
 }
 
 // ── COMPARE CHART ─────────────────────────────────────────────────────────
@@ -161,8 +184,7 @@ const compareStatus  = document.getElementById("compare-status");
 const compareDiv     = document.getElementById("compare-div");
 const compareTable   = document.getElementById("compare-table");
 
-// Wipe all compare output. Called before every request AND on every
-// validation error so stale charts and tables never survive a failed submission.
+// Unconditionally destroy all compare output.
 function clearCompareChart() {
   Plotly.purge(compareDiv);
   compareDiv.innerHTML = "";
@@ -174,8 +196,9 @@ compareForm.addEventListener("submit", async (e) => {
   const rawTickers = compareTickers.value
     .split(",").map(t => t.trim().toUpperCase()).filter(Boolean);
 
-  // Clear stale results unconditionally — before any early return path.
+  // Wipe stale output unconditionally — before any early-return path.
   clearCompareChart();
+  hideStatus(compareStatus);
 
   if (!rawTickers.length) {
     showStatus(compareStatus, "error", "Please enter at least one ticker.");
@@ -186,13 +209,15 @@ compareForm.addEventListener("submit", async (e) => {
     showStatus(compareStatus, "error", tickerErrors[0]);
     return;
   }
+
   showStatus(compareStatus, "loading", "Loading comparison…");
 
   try {
-    // rawTickers.join(",") — fixes the Phase-1 bug where the old variable
-    // name 'tickers' (now renamed 'rawTickers') was left in this call, causing
-    // a ReferenceError on every compare request.
-    const data = await apiFetch(API.compare(rawTickers.join(","), compareMetric.value, comparePeriod.value));
+    const data = await apiFetch(
+      API.compare(rawTickers.join(","), compareMetric.value, comparePeriod.value)
+    );
+    // Hard contract check — never render a degenerate payload.
+    assertComparePayload(data);
     hideStatus(compareStatus);
     if (data.errors?.length) {
       showStatus(compareStatus, "error", "Skipped: " + data.errors.join(" | "));
@@ -200,6 +225,8 @@ compareForm.addEventListener("submit", async (e) => {
     }
     renderCompareChart(data);
   } catch (err) {
+    // Clear again after async, then show error.
+    clearCompareChart();
     showStatus(compareStatus, "error", err.message);
   }
 });
@@ -208,7 +235,6 @@ function renderCompareChart(data) {
   const fig = JSON.parse(data.chart);
   Plotly.newPlot(compareDiv, fig.data, fig.layout, PLOTLY_CFG);
 
-  // summary table
   const rows = data.results
     .slice()
     .sort((a, b) => a.zscore - b.zscore)
@@ -278,9 +304,9 @@ async function removeTicker(t) {
 }
 
 async function loadWatchlistRanked() {
-  showStatus(wlStatus, "loading", "Ranking watchlist…");
   wlTableBody.innerHTML = "";
   wlEmpty.style.display = "none";
+  showStatus(wlStatus, "loading", "Ranking watchlist…");
 
   try {
     const data = await apiFetch(API.wlRank(wlMetric.value, wlPeriod.value));
@@ -313,6 +339,7 @@ async function loadWatchlistRanked() {
         </tr>`;
     }).join("");
   } catch (err) {
+    wlTableBody.innerHTML = "";
     showStatus(wlStatus, "error", err.message);
   }
 }
