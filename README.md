@@ -43,9 +43,6 @@ pip install -r requirements.txt
 
 # Run (live market data via yfinance)
 uvicorn app.main:app --reload --port 8000
-
-# Run in demo mode (offline / sandbox — uses synthetic data)
-DEMO_MODE=1 uvicorn app.main:app --reload --port 8000
 ```
 
 Open **http://localhost:8000** in your browser.
@@ -64,7 +61,6 @@ stock-agent/
 │   └── services/
 │       ├── data_fetcher.py      # yfinance data + analytics (live + fallback)
 │       ├── chart_builder.py     # Plotly chart construction
-│       ├── demo_data.py         # Realistic synthetic data (offline mode)
 │       └── watchlist.py         # File-backed watchlist CRUD
 ├── static/
 │   ├── css/style.css            # Dark professional theme

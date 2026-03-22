@@ -12,6 +12,17 @@ const API = {
 
 const PLOTLY_CFG = { responsive: true, displayModeBar: false };
 
+// Mirrors the server-side _TICKER_RE in data_fetcher.py
+const TICKER_RE = /^[A-Z0-9.\-]{1,10}$/;
+
+function validateTicker(t) {
+  if (!t) return "Ticker symbol cannot be empty.";
+  if (!TICKER_RE.test(t)) {
+    return `'${t}' is not a valid ticker symbol. Use only letters, digits, dots, or hyphens (max 10 characters).`;
+  }
+  return null;
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────
 function zColor(z) {
   if (z < -1) return "#3fb950";
@@ -75,7 +86,12 @@ const statPills    = document.getElementById("stat-pills");
 singleForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const ticker = singleTicker.value.trim().toUpperCase();
-  if (!ticker) return;
+  const tickerErr = validateTicker(ticker);
+  if (tickerErr) {
+    showStatus(singleStatus, "error", tickerErr);
+    return;
+  }
+
   showStatus(singleStatus, "loading", `Fetching ${ticker}…`);
   chartDiv.innerHTML = "";
   summaryBox.style.display = "none";
@@ -83,14 +99,6 @@ singleForm.addEventListener("submit", async (e) => {
   try {
     const data = await apiFetch(API.chart(ticker, singleMetric.value, singlePeriod.value));
     hideStatus(singleStatus);
-    if (data.demo) {
-      showStatus(singleStatus, "loading",
-        "Demo mode: live market data unavailable. Showing realistic synthetic data for illustration.");
-      singleStatus.querySelector(".spinner")?.remove();
-      singleStatus.style.background = "rgba(227,179,65,.12)";
-      singleStatus.style.color = "#e3b341";
-      singleStatus.style.border = "1px solid rgba(227,179,65,.3)";
-    }
     renderSingleChart(data);
   } catch (err) {
     showStatus(singleStatus, "error", err.message);
@@ -141,8 +149,17 @@ const compareTable   = document.getElementById("compare-table");
 
 compareForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const tickers = compareTickers.value.trim();
-  if (!tickers) return;
+  const rawTickers = compareTickers.value
+    .split(",").map(t => t.trim().toUpperCase()).filter(Boolean);
+  if (!rawTickers.length) {
+    showStatus(compareStatus, "error", "Please enter at least one ticker.");
+    return;
+  }
+  const tickerErrors = rawTickers.map(t => validateTicker(t)).filter(Boolean);
+  if (tickerErrors.length) {
+    showStatus(compareStatus, "error", tickerErrors[0]);
+    return;
+  }
   showStatus(compareStatus, "loading", "Loading comparison…");
   compareDiv.innerHTML = "";
   compareTable.innerHTML = "";
@@ -204,7 +221,11 @@ const wlEmpty     = document.getElementById("wl-empty");
 
 wlAddBtn.addEventListener("click", async () => {
   const t = wlAddInput.value.trim().toUpperCase();
-  if (!t) return;
+  const tickerErr = validateTicker(t);
+  if (tickerErr) {
+    showStatus(wlStatus, "error", tickerErr);
+    return;
+  }
   try {
     await fetch(API.wlAdd(), {
       method: "POST",

@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.services.data_fetcher import MetricKey, fetch_valuation_series
+from app.services.data_fetcher import MetricKey, fetch_valuation_series, validate_ticker
 from app.services.watchlist import add_ticker, get_watchlist, remove_ticker
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
@@ -25,7 +25,12 @@ async def list_watchlist():
 
 @router.post("/add")
 async def watchlist_add(body: TickerBody):
-    tickers = add_ticker(body.ticker)
+    """Add a validated ticker to the watchlist."""
+    try:
+        symbol = validate_ticker(body.ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    tickers = add_ticker(symbol)
     return {"tickers": tickers}
 
 
@@ -40,18 +45,25 @@ async def watchlist_ranked(
     metric: MetricKey = "forward_pe",
     period: str = "5y",
 ):
-    """Return watchlist tickers ranked by z-score (cheapest first)."""
+    """
+    Return watchlist tickers ranked by z-score, cheapest first.
+
+    Tickers whose data cannot be fetched are reported in the errors list
+    and excluded from the ranking — they do not cause the whole request to fail.
+    """
     tickers = get_watchlist()
     if not tickers:
         return {"ranked": [], "errors": []}
 
-    results = []
-    errors = []
+    results: list[dict] = []
+    errors: list[str] = []
 
-    async def _fetch(sym: str):
-        loop = asyncio.get_event_loop()
+    async def _fetch(sym: str) -> None:
+        loop = asyncio.get_running_loop()
         try:
-            data = await loop.run_in_executor(None, fetch_valuation_series, sym, metric, period)
+            data = await loop.run_in_executor(
+                None, fetch_valuation_series, sym, metric, period
+            )
             results.append(
                 {
                     "symbol": data["symbol"],
@@ -63,8 +75,12 @@ async def watchlist_ranked(
                     "summary": data["summary"],
                 }
             )
-        except Exception as exc:
+        except (ValueError, RuntimeError) as exc:
+            logger.warning("Watchlist fetch failed for %s: %s", sym, exc)
             errors.append(f"{sym}: {exc}")
+        except Exception as exc:
+            logger.exception("Unexpected watchlist error for %s", sym)
+            errors.append(f"{sym}: unexpected error — {exc}")
 
     await asyncio.gather(*[_fetch(t) for t in tickers])
     ranked = sorted(results, key=lambda x: x["zscore"])
