@@ -372,60 +372,122 @@ def _yf_price_history(symbol: str, days: int) -> pd.Series:
     return s
 
 
-def _yf_quarterly_income(symbol: str) -> pd.DataFrame:
-    """
-    yfinance quarterly income fallback.
+_NI_COLS  = [
+    "Net Income",
+    "Net Income Common Stockholders",
+    "Net Income From Continuing Operations",
+]
+_REV_COLS = ["Total Revenue", "Revenue", "Net Revenue"]
 
-    Tries quarterly_income_stmt first (the current yfinance API), then falls
-    back to quarterly_financials (legacy alias).  Uses whichever returns more
-    quarterly periods, since a larger history directly extends how far back the
-    TTM rolling window can reach and therefore how long the final metric series
-    will be.
+
+def _yf_extract_ni_rev(fin_t: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Extract net-income and revenue from a transposed yfinance income statement."""
+    ni_col  = next((c for c in _NI_COLS  if c in fin_t.columns), None)
+    rev_col = next((c for c in _REV_COLS if c in fin_t.columns), None)
+    ni  = fin_t[ni_col].dropna()  if ni_col  else pd.Series(dtype=float)
+    rev = fin_t[rev_col].dropna() if rev_col else pd.Series(dtype=float)
+    return ni, rev
+
+
+def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
     """
-    logger.warning("[FALLBACK yfinance] quarterly income for '%s'.", symbol)
+    yfinance fallback: build TTM net-income + revenue series.
+
+    Two-tier approach:
+      1. quarterly_income_stmt / quarterly_financials → rolling-4 TTM
+         (high temporal resolution, but yfinance typically returns only 5-6
+         quarters, so the TTM series covers only 1-2 recent quarters).
+      2. income_stmt / financials (annual) → each fiscal-year total IS a TTM
+         value at the fiscal-year-end date; yfinance usually provides 4-5 years.
+
+    The two are merged so that annual data covers the historical span and
+    quarterly TTM provides precision for the most recent periods.  The result
+    typically covers 4-5 years — enough for 1y through 5y requests.
+    """
+    logger.warning("[FALLBACK yfinance] TTM income for '%s'.", symbol)
     ticker = yf.Ticker(symbol)
 
-    # Try both attribute names; pick the one with more periods.
-    fin: pd.DataFrame | None = None
+    # ── 1. Quarterly rolling TTM ─────────────────────────────────────────────
+    q_ni_ttm  = pd.Series(dtype=float)
+    q_rev_ttm = pd.Series(dtype=float)
     for attr in ("quarterly_income_stmt", "quarterly_financials"):
         try:
-            candidate = getattr(ticker, attr, None)
-            if candidate is None:
+            fin = getattr(ticker, attr, None)
+            if fin is None or (hasattr(fin, "empty") and fin.empty):
                 continue
-            if hasattr(candidate, "empty") and candidate.empty:
-                continue
-            if fin is None or len(candidate.columns) > len(fin.columns):
-                fin = candidate
-                logger.debug("yfinance %s returned %d periods for %s", attr, len(candidate.columns), symbol)
+            fin.columns = _strip_tz(pd.to_datetime(fin.columns))
+            fin_t = fin.T.sort_index()
+            ni, rev = _yf_extract_ni_rev(fin_t)
+            if len(ni) > 0:
+                ttm = ni.rolling(4, min_periods=4).sum().dropna()
+                if len(ttm) > len(q_ni_ttm):
+                    q_ni_ttm = ttm
+                    logger.debug(
+                        "yfinance %s: %d quarterly TTM ni points for %s",
+                        attr, len(ttm), symbol,
+                    )
+            if len(rev) > 0:
+                ttm = rev.rolling(4, min_periods=4).sum().dropna()
+                if len(ttm) > len(q_rev_ttm):
+                    q_rev_ttm = ttm
         except Exception as exc:
             logger.debug("yfinance %s unavailable for %s: %s", attr, symbol, exc)
 
-    if fin is None or fin.empty:
+    # ── 2. Annual TTM (fiscal-year total = TTM at fiscal-year-end) ───────────
+    a_ni  = pd.Series(dtype=float)
+    a_rev = pd.Series(dtype=float)
+    for attr in ("income_stmt", "financials"):
+        try:
+            fin = getattr(ticker, attr, None)
+            if fin is None or (hasattr(fin, "empty") and fin.empty):
+                continue
+            fin.columns = _strip_tz(pd.to_datetime(fin.columns))
+            fin_t = fin.T.sort_index()
+            ni, rev = _yf_extract_ni_rev(fin_t)
+            if len(ni) > len(a_ni):
+                a_ni = ni
+                logger.debug(
+                    "yfinance %s: %d annual ni points for %s", attr, len(ni), symbol
+                )
+            if len(rev) > len(a_rev):
+                a_rev = rev
+        except Exception as exc:
+            logger.debug("yfinance %s unavailable for %s: %s", attr, symbol, exc)
+
+    # ── 3. Merge: annual provides historical base, quarterly TTM is recent ───
+    def _merge(q_ttm: pd.Series, a_vals: pd.Series) -> pd.Series:
+        """Keep annual points that pre-date the first quarterly TTM by >45 days,
+        then append the quarterly TTM series.  This extends the timeline backwards
+        without double-counting the same fiscal period."""
+        if q_ttm.empty and a_vals.empty:
+            return pd.Series(dtype=float)
+        if q_ttm.empty:
+            return a_vals.sort_index()
+        if a_vals.empty:
+            return q_ttm.sort_index()
+        cutoff = q_ttm.index[0] - pd.Timedelta(days=45)
+        prior  = a_vals[a_vals.index <= cutoff]
+        merged = pd.concat([prior, q_ttm]).sort_index()
+        return merged[~merged.index.duplicated(keep="last")]
+
+    ni_ttm  = _merge(q_ni_ttm,  a_ni)
+    rev_ttm = _merge(q_rev_ttm, a_rev)
+
+    if ni_ttm.empty and rev_ttm.empty:
         raise ValueError(
-            f"yfinance has no quarterly financials for '{symbol}'. "
+            f"yfinance has no income data for '{symbol}'. "
             "Likely an ETF, SPAC, or foreign stock without US filings."
         )
 
-    fin.columns = _strip_tz(pd.to_datetime(fin.columns))
-    fin_t = fin.T.sort_index()
-
-    ni_candidates  = ["Net Income", "Net Income Common Stockholders",
-                      "Net Income From Continuing Operations"]
-    rev_candidates = ["Total Revenue", "Revenue", "Net Revenue"]
-
-    ni_col  = next((c for c in ni_candidates  if c in fin_t.columns), None)
-    rev_col = next((c for c in rev_candidates if c in fin_t.columns), None)
-
-    if ni_col is None and rev_col is None:
-        raise ValueError(
-            f"yfinance quarterly financials for '{symbol}' contain neither "
-            "Net Income nor Revenue."
-        )
-
-    result = pd.DataFrame(index=fin_t.index)
-    result["netIncome"] = fin_t[ni_col]  if ni_col  else np.nan
-    result["revenue"]   = fin_t[rev_col] if rev_col else np.nan
-    return result.dropna(how="all")
+    logger.warning(
+        "[FALLBACK yfinance] TTM income for '%s': ni=%d pts (%s→%s), rev=%d pts",
+        symbol,
+        len(ni_ttm),
+        ni_ttm.index[0].date() if not ni_ttm.empty else "—",
+        ni_ttm.index[-1].date() if not ni_ttm.empty else "—",
+        len(rev_ttm),
+    )
+    return {"ni_ttm": ni_ttm, "rev_ttm": rev_ttm}, "yfinance"
 
 
 def _yf_shares(symbol: str) -> float:
@@ -504,15 +566,42 @@ def _get_price(symbol: str, days: int) -> tuple[pd.Series, str]:
     return yf_series, "yfinance"
 
 
-def _get_quarterly_income(symbol: str) -> tuple[pd.DataFrame, str]:
+def _fmp_ttm_income(symbol: str) -> tuple[dict, str]:
+    """FMP quarterly data → rolling-4 TTM net income + revenue."""
+    df = _fmp_quarterly_income(symbol)
+
+    ni  = df.get("netIncome", pd.Series(dtype=float)).dropna().sort_index()
+    rev = df.get("revenue",   pd.Series(dtype=float)).dropna().sort_index()
+
+    ni_ttm  = ni.rolling(4,  min_periods=4).sum().dropna()
+    rev_ttm = rev.rolling(4, min_periods=4).sum().dropna()
+
+    if ni_ttm.empty and rev_ttm.empty:
+        raise FMPError(
+            f"FMP returned insufficient quarterly data for TTM computation "
+            f"for '{symbol}' (need \u22654 quarters)."
+        )
+    logger.info(
+        "FMP TTM income for '%s': ni=%d pts (%s→%s), rev=%d pts",
+        symbol,
+        len(ni_ttm),
+        ni_ttm.index[0].date() if not ni_ttm.empty else "—",
+        ni_ttm.index[-1].date() if not ni_ttm.empty else "—",
+        len(rev_ttm),
+    )
+    return {"ni_ttm": ni_ttm, "rev_ttm": rev_ttm}, "fmp"
+
+
+def _get_ttm_income(symbol: str) -> tuple[dict, str]:
+    """Fetch TTM net income + revenue series.  FMP first, yfinance fallback."""
     try:
-        return _fmp_quarterly_income(symbol), "fmp"
+        return _fmp_ttm_income(symbol)
     except FMPError as exc:
         logger.warning(
-            "FMP income fetch failed for '%s' — falling back to yfinance. Reason: %s",
+            "FMP TTM income failed for '%s' — falling back to yfinance. Reason: %s",
             symbol, exc,
         )
-    return _yf_quarterly_income(symbol), "yfinance"
+    return _yf_ttm_income(symbol)
 
 
 def _get_shares(symbol: str) -> tuple[float, str]:
@@ -534,23 +623,16 @@ def _trailing_pe_series(
     symbol: str, price: pd.Series
 ) -> tuple[pd.Series, list[str]]:
     """Build daily Trailing P/E. Returns (series, [income_source, shares_source])."""
-    income_df, inc_src = _get_quarterly_income(symbol)
+    ttm, inc_src = _get_ttm_income(symbol)
 
-    ni = income_df.get("netIncome", pd.Series(dtype=float)).dropna().sort_index()
-    if ni.empty:
+    ni_ttm = ttm.get("ni_ttm", pd.Series(dtype=float)).dropna().sort_index()
+    if ni_ttm.empty:
         raise ValueError(
-            f"Net income data is unavailable for '{symbol}'. "
+            f"Net income TTM data is unavailable for '{symbol}'. "
             "Cannot compute Trailing P/E. Try Price/Sales instead."
         )
 
     shares, sh_src = _get_shares(symbol)
-
-    ni_ttm = ni.rolling(4, min_periods=4).sum().dropna()
-    if ni_ttm.empty:
-        raise ValueError(
-            f"Fewer than 4 quarters of earnings available for '{symbol}'. "
-            "Try a shorter period or use Price/Sales."
-        )
 
     eps_ttm = ni_ttm / shares
     eps_ttm.index = _strip_tz(pd.to_datetime(eps_ttm.index))
@@ -563,23 +645,16 @@ def _price_sales_series(
     symbol: str, price: pd.Series
 ) -> tuple[pd.Series, list[str]]:
     """Build daily Price/Sales. Returns (series, [income_source, shares_source])."""
-    income_df, inc_src = _get_quarterly_income(symbol)
+    ttm, inc_src = _get_ttm_income(symbol)
 
-    rev = income_df.get("revenue", pd.Series(dtype=float)).dropna().sort_index()
-    if rev.empty:
+    rev_ttm = ttm.get("rev_ttm", pd.Series(dtype=float)).dropna().sort_index()
+    if rev_ttm.empty:
         raise ValueError(
-            f"Revenue data is unavailable for '{symbol}'. "
+            f"Revenue TTM data is unavailable for '{symbol}'. "
             "Cannot compute Price/Sales."
         )
 
     shares, sh_src = _get_shares(symbol)
-
-    rev_ttm = rev.rolling(4, min_periods=4).sum().dropna()
-    if rev_ttm.empty:
-        raise ValueError(
-            f"Fewer than 4 quarters of revenue available for '{symbol}'. "
-            "Try a shorter period."
-        )
 
     rev_ttm.index = _strip_tz(pd.to_datetime(rev_ttm.index))
     rev_daily = rev_ttm.reindex(price.index, method="ffill")
