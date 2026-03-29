@@ -395,6 +395,10 @@ def _yf_extract_ni_rev(fin_t: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     """Extract net-income and revenue from a transposed yfinance income statement."""
     ni_col  = next((c for c in _NI_COLS  if c in fin_t.columns), None)
     rev_col = next((c for c in _REV_COLS if c in fin_t.columns), None)
+    # ── TRACE: show every available column so we can spot name mismatches ──────
+    print(f"  [extract] all_cols={list(fin_t.columns)}")
+    print(f"  [extract] ni_col_matched={ni_col}  rev_col_matched={rev_col}")
+    # ───────────────────────────────────────────────────────────────────────────
     ni  = fin_t[ni_col].dropna()  if ni_col  else pd.Series(dtype=float)
     rev = fin_t[rev_col].dropna() if rev_col else pd.Series(dtype=float)
     return ni, rev
@@ -621,6 +625,8 @@ def _fmp_ttm_income(symbol: str) -> tuple[dict, str]:
     # ── TRACE ──────────────────────────────────────────────────────────────────
     print(f"\n[TRACE] _fmp_ttm_income({symbol})")
     print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
+    if len(ni) < 23:
+        print(f"  WARNING: raw ni rows={len(ni)} < 23 — fewer than 20 TTM points will result; 5y needs >=23 quarters")
     print(f"  ni_ttm rows={len(ni_ttm)}")
     if not ni_ttm.empty:
         print(f"  ni_ttm min={ni_ttm.index.min()}  max={ni_ttm.index.max()}")
@@ -711,6 +717,31 @@ def _trailing_pe_series(
     print(f"  eps_ttm last5={list(eps_ttm.index[-5:])}")
     # ───────────────────────────────────────────────────────────────────────────
 
+    # FAIL EARLY: reindex+ffill produces NaN for every price date before
+    # eps_ttm.index.min().  dropna() then silently removes those dates,
+    # leaving a series that only covers the tail of the requested period.
+    # Check now so we raise a clear error instead of returning a short chart.
+    price_span  = _series_span_days(price)
+    min_needed  = int(price_span * _PERIOD_COVERAGE_THRESHOLD)
+    eps_first   = pd.Timestamp(eps_ttm.index.min())
+    price_last  = pd.Timestamp(price.index.max())
+    ttm_cover   = (price_last - eps_first).days
+    print(f"[TRACE] _trailing_pe_series({symbol}) TTM COVERAGE CHECK")
+    print(f"  price_span={price_span} days  min_needed={min_needed} days")
+    print(f"  eps_first={eps_first.date()}  ttm_cover={ttm_cover} days")
+    print(f"  verdict={'PASS' if ttm_cover >= min_needed else 'FAIL'}")
+    if ttm_cover < min_needed:
+        raise ValueError(
+            f"EPS TTM coverage insufficient for '{symbol}': "
+            f"earliest TTM point is {eps_first.date()} "
+            f"({ttm_cover} days before end of price window), "
+            f"but {min_needed} days are required. "
+            f"eps_ttm has {len(eps_ttm)} point(s): "
+            f"{eps_ttm.index.min().date()} \u2192 {eps_ttm.index.max().date()}. "
+            "Set FMP_API_KEY for extended financial history (up to 44 quarters), "
+            "or select a shorter period."
+        )
+
     eps_daily = eps_ttm.reindex(price.index, method="ffill")
 
     # ── TRACE ──────────────────────────────────────────────────────────────────
@@ -751,6 +782,29 @@ def _price_sales_series(
     shares, sh_src = _get_shares(symbol)
 
     rev_ttm.index = _strip_tz(pd.to_datetime(rev_ttm.index))
+
+    # FAIL EARLY: same coverage guard as _trailing_pe_series.
+    price_span = _series_span_days(price)
+    min_needed = int(price_span * _PERIOD_COVERAGE_THRESHOLD)
+    rev_first  = pd.Timestamp(rev_ttm.index.min())
+    price_last = pd.Timestamp(price.index.max())
+    ttm_cover  = (price_last - rev_first).days
+    print(f"[TRACE] _price_sales_series({symbol}) REV TTM COVERAGE CHECK")
+    print(f"  price_span={price_span} days  min_needed={min_needed} days")
+    print(f"  rev_first={rev_first.date()}  ttm_cover={ttm_cover} days")
+    print(f"  verdict={'PASS' if ttm_cover >= min_needed else 'FAIL'}")
+    if ttm_cover < min_needed:
+        raise ValueError(
+            f"Revenue TTM coverage insufficient for '{symbol}': "
+            f"earliest TTM point is {rev_first.date()} "
+            f"({ttm_cover} days before end of price window), "
+            f"but {min_needed} days are required. "
+            f"rev_ttm has {len(rev_ttm)} point(s): "
+            f"{rev_ttm.index.min().date()} \u2192 {rev_ttm.index.max().date()}. "
+            "Set FMP_API_KEY for extended financial history (up to 44 quarters), "
+            "or select a shorter period."
+        )
+
     rev_daily = rev_ttm.reindex(price.index, method="ffill")
     market_cap = price * shares
     ps = market_cap / rev_daily
