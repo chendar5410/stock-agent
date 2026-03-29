@@ -235,7 +235,18 @@ def _fmp_quarterly_income(symbol: str) -> pd.DataFrame:
 
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").set_index("date")
-    return df[["netIncome", "revenue"]]
+    result = df[["netIncome", "revenue"]]
+
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"\n[TRACE] _fmp_quarterly_income({symbol})")
+    print(f"  rows={len(result)}")
+    print(f"  min_date={result.index.min()}")
+    print(f"  max_date={result.index.max()}")
+    print(f"  first5={list(result.index[:5])}")
+    print(f"  last5={list(result.index[-5:])}")
+    # ───────────────────────────────────────────────────────────────────────────
+
+    return result
 
 
 def _fmp_shares(symbol: str) -> float:
@@ -414,12 +425,20 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
         try:
             fin = getattr(ticker, attr, None)
             if fin is None or (hasattr(fin, "empty") and fin.empty):
+                print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr}: empty/None")
                 continue
             fin.columns = _strip_tz(pd.to_datetime(fin.columns))
             fin_t = fin.T.sort_index()
             ni, rev = _yf_extract_ni_rev(fin_t)
+            # ── TRACE ─────────────────────────────────────────────────────────
+            print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr}")
+            print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
+            if not ni.empty:
+                print(f"  ni dates: {list(ni.index)}")
+            # ──────────────────────────────────────────────────────────────────
             if len(ni) > 0:
                 ttm = ni.rolling(4, min_periods=4).sum().dropna()
+                print(f"  ni_ttm after rolling(4): rows={len(ttm)}  dates={list(ttm.index)}")
                 if len(ttm) > len(q_ni_ttm):
                     q_ni_ttm = ttm
                     logger.debug(
@@ -431,6 +450,7 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
                 if len(ttm) > len(q_rev_ttm):
                     q_rev_ttm = ttm
         except Exception as exc:
+            print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr} EXCEPTION: {exc}")
             logger.debug("yfinance %s unavailable for %s: %s", attr, symbol, exc)
 
     # ── 2. Annual TTM (fiscal-year total = TTM at fiscal-year-end) ───────────
@@ -440,10 +460,17 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
         try:
             fin = getattr(ticker, attr, None)
             if fin is None or (hasattr(fin, "empty") and fin.empty):
+                print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr}: empty/None")
                 continue
             fin.columns = _strip_tz(pd.to_datetime(fin.columns))
             fin_t = fin.T.sort_index()
             ni, rev = _yf_extract_ni_rev(fin_t)
+            # ── TRACE ─────────────────────────────────────────────────────────
+            print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr}")
+            print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
+            if not ni.empty:
+                print(f"  ni dates: {list(ni.index)}")
+            # ──────────────────────────────────────────────────────────────────
             if len(ni) > len(a_ni):
                 a_ni = ni
                 logger.debug(
@@ -452,6 +479,7 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
             if len(rev) > len(a_rev):
                 a_rev = rev
         except Exception as exc:
+            print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr} EXCEPTION: {exc}")
             logger.debug("yfinance %s unavailable for %s: %s", attr, symbol, exc)
 
     # ── 3. Merge: annual provides historical base, quarterly TTM is recent ───
@@ -472,6 +500,20 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
 
     ni_ttm  = _merge(q_ni_ttm,  a_ni)
     rev_ttm = _merge(q_rev_ttm, a_rev)
+
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"\n[TRACE] _yf_ttm_income({symbol}) MERGED RESULT")
+    print(f"  ni_ttm rows={len(ni_ttm)}")
+    if not ni_ttm.empty:
+        print(f"  ni_ttm min={ni_ttm.index.min()}  max={ni_ttm.index.max()}")
+        print(f"  ni_ttm first5={list(ni_ttm.index[:5])}")
+        print(f"  ni_ttm last5={list(ni_ttm.index[-5:])}")
+    print(f"  rev_ttm rows={len(rev_ttm)}")
+    if not rev_ttm.empty:
+        print(f"  rev_ttm min={rev_ttm.index.min()}  max={rev_ttm.index.max()}")
+        print(f"  rev_ttm first5={list(rev_ttm.index[:5])}")
+        print(f"  rev_ttm last5={list(rev_ttm.index[-5:])}")
+    # ───────────────────────────────────────────────────────────────────────────
 
     if ni_ttm.empty and rev_ttm.empty:
         raise ValueError(
@@ -576,6 +618,19 @@ def _fmp_ttm_income(symbol: str) -> tuple[dict, str]:
     ni_ttm  = ni.rolling(4,  min_periods=4).sum().dropna()
     rev_ttm = rev.rolling(4, min_periods=4).sum().dropna()
 
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"\n[TRACE] _fmp_ttm_income({symbol})")
+    print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
+    print(f"  ni_ttm rows={len(ni_ttm)}")
+    if not ni_ttm.empty:
+        print(f"  ni_ttm min={ni_ttm.index.min()}  max={ni_ttm.index.max()}")
+        print(f"  ni_ttm first5={list(ni_ttm.index[:5])}")
+        print(f"  ni_ttm last5={list(ni_ttm.index[-5:])}")
+    print(f"  rev_ttm rows={len(rev_ttm)}")
+    if not rev_ttm.empty:
+        print(f"  rev_ttm min={rev_ttm.index.min()}  max={rev_ttm.index.max()}")
+    # ───────────────────────────────────────────────────────────────────────────
+
     if ni_ttm.empty and rev_ttm.empty:
         raise FMPError(
             f"FMP returned insufficient quarterly data for TTM computation "
@@ -594,13 +649,20 @@ def _fmp_ttm_income(symbol: str) -> tuple[dict, str]:
 
 def _get_ttm_income(symbol: str) -> tuple[dict, str]:
     """Fetch TTM net income + revenue series.  FMP first, yfinance fallback."""
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"\n[TRACE] _get_ttm_income({symbol}) — trying FMP first")
+    # ───────────────────────────────────────────────────────────────────────────
     try:
-        return _fmp_ttm_income(symbol)
+        result = _fmp_ttm_income(symbol)
+        print(f"[TRACE] _get_ttm_income({symbol}) — FMP succeeded")
+        return result
     except FMPError as exc:
+        print(f"[TRACE] _get_ttm_income({symbol}) — FMP failed: {exc}")
         logger.warning(
             "FMP TTM income failed for '%s' — falling back to yfinance. Reason: %s",
             symbol, exc,
         )
+    print(f"[TRACE] _get_ttm_income({symbol}) — falling back to yfinance")
     return _yf_ttm_income(symbol)
 
 
@@ -623,6 +685,11 @@ def _trailing_pe_series(
     symbol: str, price: pd.Series
 ) -> tuple[pd.Series, list[str]]:
     """Build daily Trailing P/E. Returns (series, [income_source, shares_source])."""
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"\n[TRACE] _trailing_pe_series({symbol})")
+    print(f"  price rows={len(price)}  min={price.index.min()}  max={price.index.max()}")
+    # ───────────────────────────────────────────────────────────────────────────
+
     ttm, inc_src = _get_ttm_income(symbol)
 
     ni_ttm = ttm.get("ni_ttm", pd.Series(dtype=float)).dropna().sort_index()
@@ -636,9 +703,36 @@ def _trailing_pe_series(
 
     eps_ttm = ni_ttm / shares
     eps_ttm.index = _strip_tz(pd.to_datetime(eps_ttm.index))
+
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"[TRACE] _trailing_pe_series({symbol}) eps_ttm BEFORE reindex")
+    print(f"  eps_ttm rows={len(eps_ttm)}  min={eps_ttm.index.min()}  max={eps_ttm.index.max()}")
+    print(f"  eps_ttm first5={list(eps_ttm.index[:5])}")
+    print(f"  eps_ttm last5={list(eps_ttm.index[-5:])}")
+    # ───────────────────────────────────────────────────────────────────────────
+
     eps_daily = eps_ttm.reindex(price.index, method="ffill")
+
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    nan_count = eps_daily.isna().sum()
+    print(f"[TRACE] _trailing_pe_series({symbol}) eps_daily AFTER reindex+ffill")
+    print(f"  eps_daily rows={len(eps_daily)}  NaN count={nan_count}")
+    print(f"  eps_daily first non-NaN date={eps_daily.first_valid_index()}")
+    # ───────────────────────────────────────────────────────────────────────────
+
     pe = price / eps_daily
-    return pe.replace([np.inf, -np.inf], np.nan).dropna(), [inc_src, sh_src]
+    pe_clean = pe.replace([np.inf, -np.inf], np.nan).dropna()
+
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"[TRACE] _trailing_pe_series({symbol}) pe AFTER dropna")
+    print(f"  pe rows={len(pe_clean)}")
+    if not pe_clean.empty:
+        print(f"  pe min_date={pe_clean.index.min()}  max_date={pe_clean.index.max()}")
+        print(f"  pe first5={list(pe_clean.index[:5])}")
+        print(f"  pe last5={list(pe_clean.index[-5:])}")
+    # ───────────────────────────────────────────────────────────────────────────
+
+    return pe_clean, [inc_src, sh_src]
 
 
 def _price_sales_series(
@@ -753,6 +847,12 @@ def fetch_valuation_series(
         symbol, metric, period, days,
     )
 
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print(f"[TRACE] fetch_valuation_series  symbol={symbol}  metric={metric}  period={period}  requested_days={days}")
+    print(f"{'='*60}")
+    # ───────────────────────────────────────────────────────────────────────────
+
     price, price_src = _get_price(symbol, days)
 
     logger.info(
@@ -780,6 +880,20 @@ def fetch_valuation_series(
         ) from exc
 
     series = _clean_series(series, symbol, metric)
+
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"\n[TRACE] fetch_valuation_series({symbol}) AFTER _clean_series")
+    print(f"  period={period}  requested_days={days}")
+    print(f"  final series rows={len(series)}")
+    if not series.empty:
+        print(f"  final series min_date={series.index.min()}")
+        print(f"  final series max_date={series.index.max()}")
+        print(f"  final series first5={list(series.index[:5])}")
+        print(f"  final series last5={list(series.index[-5:])}")
+        span = _series_span_days(series)
+        min_needed = int(days * _PERIOD_COVERAGE_THRESHOLD)
+        print(f"  span_days={span}  min_needed={min_needed}  passes={'YES' if span >= min_needed else 'NO'}")
+    # ───────────────────────────────────────────────────────────────────────────
 
     # Compute source label BEFORE the coverage check so it appears in error messages.
     all_sources = [price_src, *fund_sources]
