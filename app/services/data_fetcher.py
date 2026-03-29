@@ -62,12 +62,10 @@ VALID_METRICS = frozenset(METRIC_LABELS.keys())
 _TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 REQUEST_TIMEOUT = 20  # seconds
 
-# A provider must return at least this fraction of the requested calendar days.
-# Below this threshold we treat the response as truncated and raise an error.
-# FMP free/developer keys silently return only ~5 months regardless of from/to;
-# this check converts that silent truncation into an explicit error so the
-# yfinance fallback (or the user) knows what happened.
-_PERIOD_COVERAGE_THRESHOLD = 0.75
+# Minimum fraction of requested calendar days that a price series must cover.
+# If a provider returns less, the data is discarded and the next source is tried.
+# 0.70 = a 3y request must return ≥ 766 days, a 10y request ≥ 2555 days, etc.
+_PERIOD_COVERAGE_THRESHOLD = 0.70
 
 
 # ── Input validation ──────────────────────────────────────────────────────────
@@ -133,41 +131,11 @@ def _clean_series(series: pd.Series, symbol: str, metric: str) -> pd.Series:
     return series
 
 
-def _check_price_coverage(
-    series: pd.Series,
-    requested_days: int,
-    symbol: str,
-    *,
-    exc_type: type,
-) -> None:
-    """
-    Raise exc_type if the returned series covers materially less than requested.
-
-    Pass exc_type=FMPError to trigger the yfinance fallback.
-    Pass exc_type=ValueError to surface a hard error to the caller.
-
-    Root cause this guards against: FMP free/developer keys silently return
-    only the most recent ~5 months from /historical-price-full regardless of
-    the from= and to= query parameters.  Without this check every period
-    renders the same ~5-month window.
-    """
-    if series.empty:
-        return  # empty-series errors are handled separately
-
-    actual_start = pd.Timestamp(series.index[0])
-    actual_end   = pd.Timestamp(series.index[-1])
-    actual_days  = (actual_end - actual_start).days
-    min_days     = int(requested_days * _PERIOD_COVERAGE_THRESHOLD)
-
-    if actual_days < min_days:
-        raise exc_type(
-            f"Price history for '{symbol}' spans only {actual_days} calendar days "
-            f"({actual_start.date()} \u2192 {actual_end.date()}), "
-            f"but the requested period needs at least {min_days} days "
-            f"({requested_days} \u00d7 {_PERIOD_COVERAGE_THRESHOLD:.0%} threshold). "
-            "The data provider may be limiting historical depth due to subscription tier. "
-            "Try a shorter period, or verify the ticker has sufficient trading history."
-        )
+def _series_span_days(s: pd.Series) -> int:
+    """Return calendar days between the first and last index entry."""
+    if len(s) < 2:
+        return 0
+    return (pd.Timestamp(s.index[-1]) - pd.Timestamp(s.index[0])).days
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -266,10 +234,6 @@ def _fmp_price_history(symbol: str, days: int) -> pd.Series:
             f"FMP returned only {len(series)} price point(s) for '{symbol}'. "
             "Insufficient history."
         )
-
-    # Hard coverage check — raises FMPError to trigger yfinance fallback when FMP
-    # silently truncates the date range (common on free/developer subscription tiers).
-    _check_price_coverage(series, days, symbol, exc_type=FMPError)
 
     return series
 
@@ -484,11 +448,6 @@ def _yf_price_history(symbol: str, days: int) -> pd.Series:
 
     s = hist["Close"]
     s.index = _strip_tz(s.index)
-
-    # Hard coverage check — raises ValueError (not FMPError) because there is no
-    # further fallback after yfinance.  The error surfaces as HTTP 422.
-    _check_price_coverage(s, days, symbol, exc_type=ValueError)
-
     return s
 
 
@@ -576,14 +535,51 @@ def _yf_shares(symbol: str) -> float:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _get_price(symbol: str, days: int) -> tuple[pd.Series, str]:
+    """
+    Fetch price history with mandatory period-coverage enforcement.
+
+    Flow:
+      1. Try FMP.  On FMPError OR if the returned series spans less than
+         _PERIOD_COVERAGE_THRESHOLD of the requested days → discard and fall
+         back to yfinance.
+      2. Try yfinance.  If the returned series also fails the coverage check
+         → raise ValueError (no further fallback exists).
+
+    This guarantees the caller never receives a silently truncated series
+    regardless of which provider is active.
+    """
+    min_days = int(days * _PERIOD_COVERAGE_THRESHOLD)
+
+    # ── 1. FMP attempt ────────────────────────────────────────────────────────
     try:
-        return _fmp_price_history(symbol, days), "fmp"
+        fmp_series = _fmp_price_history(symbol, days)
+        actual = _series_span_days(fmp_series)
+        if actual >= min_days:
+            return fmp_series, "fmp"
+        logger.warning(
+            "FMP price for '%s' spans only %d days (need \u2265%d for this period). "
+            "Discarding and falling back to yfinance.",
+            symbol, actual, min_days,
+        )
     except FMPError as exc:
         logger.warning(
-            "FMP price fetch failed for '%s' — using yfinance fallback. Reason: %s",
+            "FMP price fetch failed for '%s' — falling back to yfinance. Reason: %s",
             symbol, exc,
         )
-    return _yf_price_history(symbol, days), "yfinance"
+
+    # ── 2. yfinance fallback ──────────────────────────────────────────────────
+    yf_series = _yf_price_history(symbol, days)
+    actual = _series_span_days(yf_series)
+    if actual < min_days:
+        raise ValueError(
+            f"Price data for '{symbol}' covers only {actual} calendar days "
+            f"({yf_series.index[0].date()} \u2192 {yf_series.index[-1].date()}), "
+            f"but the requested period needs \u2265{min_days} days "
+            f"({_PERIOD_COVERAGE_THRESHOLD:.0%} of {days} days requested). "
+            "Both FMP and yfinance returned insufficient history. "
+            "Try a shorter period or verify the ticker has adequate trading history."
+        )
+    return yf_series, "yfinance"
 
 
 def _get_quarterly_income(symbol: str) -> tuple[pd.DataFrame, str]:
