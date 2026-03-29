@@ -2,13 +2,19 @@
 
 Primary source:  Financial Modeling Prep (FMP) v3 API.
                  Requires FMP_API_KEY environment variable.
-                 Uses /historical-price-full, /income-statement, /profile,
-                 and index-constituent endpoints (/sp500_constituent, etc.).
+Fallback source: yfinance — used ONLY when FMP is unavailable or fails.
+                 Every fallback is logged at WARNING level.
 
-Fallback source: yfinance — used ONLY when FMP is unavailable or returns an
-                 error.  Every fallback invocation is logged at WARNING level
-                 so operators know the secondary path is active.  yfinance is
-                 never called silently or as a default.
+Period enforcement
+------------------
+Coverage is validated at TWO points:
+  1. _get_price()           — price series must span >= 70% of requested days.
+  2. fetch_valuation_series — FINAL metric series must span >= 70% of requested
+                              days.  This catches the common case where the
+                              price history is sufficient but the quarterly
+                              fundamentals (only 5-6 quarters from yfinance)
+                              cause the P/E or P/S series to be truncated after
+                              the TTM rolling window and dropna().
 
 Supported metrics: trailing_pe, price_sales.
 Supported periods: 1y, 2y, 3y, 5y, 10y.
@@ -35,8 +41,8 @@ FMP_API_KEY: str = os.environ.get("FMP_API_KEY", "").strip()
 
 if not FMP_API_KEY:
     logger.warning(
-        "FMP_API_KEY is not set. Requests will fall back to yfinance. "
-        "Set FMP_API_KEY to use Financial Modeling Prep as the primary data source."
+        "FMP_API_KEY is not set. All requests will fall back to yfinance. "
+        "Set FMP_API_KEY to use Financial Modeling Prep as the primary source."
     )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -62,16 +68,14 @@ VALID_METRICS = frozenset(METRIC_LABELS.keys())
 _TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 REQUEST_TIMEOUT = 20  # seconds
 
-# Minimum fraction of requested calendar days that a price series must cover.
-# If a provider returns less, the data is discarded and the next source is tried.
-# 0.70 = a 3y request must return ≥ 766 days, a 10y request ≥ 2555 days, etc.
+# Minimum fraction of requested calendar days that a series must cover.
+# Checked on both the raw price series AND the final metric series.
 _PERIOD_COVERAGE_THRESHOLD = 0.70
 
 
 # ── Input validation ──────────────────────────────────────────────────────────
 
 def validate_ticker(symbol: str) -> str:
-    """Normalise and validate a ticker symbol. Raises ValueError on bad input."""
     s = symbol.strip().upper()
     if not s:
         raise ValueError("Ticker symbol cannot be empty.")
@@ -84,7 +88,6 @@ def validate_ticker(symbol: str) -> str:
 
 
 def validate_period(period: str) -> str:
-    """Validate time period string. Raises ValueError on bad input."""
     if period not in VALID_PERIODS:
         raise ValueError(
             f"'{period}' is not a valid period. "
@@ -94,7 +97,6 @@ def validate_period(period: str) -> str:
 
 
 def validate_metric(metric: str) -> str:
-    """Validate metric key. Raises ValueError on unsupported metric."""
     if metric not in VALID_METRICS:
         raise ValueError(
             f"'{metric}' is not a supported metric. "
@@ -108,6 +110,13 @@ def validate_metric(metric: str) -> str:
 def _strip_tz(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
     idx = pd.to_datetime(idx)
     return idx.tz_convert(None) if idx.tz is not None else idx
+
+
+def _series_span_days(s: pd.Series) -> int:
+    """Return calendar days between the first and last index entry."""
+    if len(s) < 2:
+        return 0
+    return (pd.Timestamp(s.index[-1]) - pd.Timestamp(s.index[0])).days
 
 
 def _clean_series(series: pd.Series, symbol: str, metric: str) -> pd.Series:
@@ -131,21 +140,8 @@ def _clean_series(series: pd.Series, symbol: str, metric: str) -> pd.Series:
     return series
 
 
-def _series_span_days(s: pd.Series) -> int:
-    """Return calendar days between the first and last index entry."""
-    if len(s) < 2:
-        return 0
-    return (pd.Timestamp(s.index[-1]) - pd.Timestamp(s.index[0])).days
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  FMP — PRIMARY DATA SOURCE
-#
-#  Endpoint map:
-#    prices      GET /historical-price-full/{symbol}?from=YYYY-MM-DD&to=YYYY-MM-DD&serietype=line
-#    income      GET /income-statement/{symbol}?period=quarter&limit=44
-#    profile     GET /profile/{symbol}               (shares outstanding)
-#    index lists GET /sp500_constituent | /nasdaq_constituent | /dowjones_constituent
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class FMPError(Exception):
@@ -153,16 +149,6 @@ class FMPError(Exception):
 
 
 def _fmp_get(path: str, params: dict | None = None) -> object:
-    """
-    Execute a GET against the FMP v3 API.
-
-    Raises FMPError on:
-      - FMP_API_KEY not configured
-      - Network / connection errors
-      - Non-200 HTTP status
-      - FMP {"Error Message": ...} payloads
-      - Empty list responses (unknown ticker)
-    """
     if not FMP_API_KEY:
         raise FMPError("FMP_API_KEY is not configured.")
 
@@ -189,32 +175,20 @@ def _fmp_get(path: str, params: dict | None = None) -> object:
 
 
 def _fmp_price_history(symbol: str, days: int) -> pd.Series:
-    """
-    Fetch daily closing prices from FMP /historical-price-full.
-
-    Raises FMPError when:
-      - API key is absent or invalid
-      - Response structure is unexpected
-      - Returned date range is less than _PERIOD_COVERAGE_THRESHOLD of requested days
-        (FMP free/developer keys truncate to ~5 months regardless of from/to params)
-    """
     end_dt   = datetime.now()
     start_dt = end_dt - timedelta(days=days)
 
-    # Use ISO date strings; FMP does not accept datetime objects.
     data = _fmp_get(
         f"/historical-price-full/{symbol}",
         {
-            "from": start_dt.strftime("%Y-%m-%d"),
-            "to":   end_dt.strftime("%Y-%m-%d"),
-            "serietype": "line",
+            "from":       start_dt.strftime("%Y-%m-%d"),
+            "to":         end_dt.strftime("%Y-%m-%d"),
+            "serietype":  "line",
         },
     )
 
     if not isinstance(data, dict) or "historical" not in data:
-        raise FMPError(
-            f"FMP /historical-price-full/{symbol} returned unexpected structure."
-        )
+        raise FMPError(f"FMP /historical-price-full/{symbol} returned unexpected structure.")
 
     records = data["historical"]
     if not records:
@@ -222,47 +196,30 @@ def _fmp_price_history(symbol: str, days: int) -> pd.Series:
 
     df = pd.DataFrame(records)
     if "date" not in df.columns or "close" not in df.columns:
-        raise FMPError(
-            f"FMP price records for '{symbol}' are missing 'date' or 'close' columns."
-        )
+        raise FMPError(f"FMP price records for '{symbol}' missing 'date' or 'close'.")
 
     df["date"] = pd.to_datetime(df["date"])
     series = df.sort_values("date").set_index("date")["close"].dropna()
 
     if len(series) < 5:
-        raise FMPError(
-            f"FMP returned only {len(series)} price point(s) for '{symbol}'. "
-            "Insufficient history."
-        )
+        raise FMPError(f"FMP returned only {len(series)} price point(s) for '{symbol}'.")
 
     return series
 
 
 def _fmp_quarterly_income(symbol: str) -> pd.DataFrame:
-    """
-    Fetch quarterly income statements from FMP /income-statement.
-
-    Returns a DataFrame indexed by period-end date with columns:
-      netIncome, revenue
-    Raises FMPError when data is unavailable or required columns are absent.
-    """
     records = _fmp_get(
         f"/income-statement/{symbol}",
         {"period": "quarter", "limit": 44},
     )
 
     if not isinstance(records, list):
-        raise FMPError(
-            f"FMP /income-statement/{symbol} returned unexpected type "
-            f"({type(records).__name__})."
-        )
+        raise FMPError(f"FMP /income-statement/{symbol} returned unexpected type.")
 
     df = pd.DataFrame(records)
     missing = [c for c in ("date", "netIncome", "revenue") if c not in df.columns]
     if missing:
-        raise FMPError(
-            f"FMP income-statement for '{symbol}' is missing columns: {missing}."
-        )
+        raise FMPError(f"FMP income-statement for '{symbol}' missing: {missing}.")
 
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").set_index("date")
@@ -270,11 +227,6 @@ def _fmp_quarterly_income(symbol: str) -> pd.DataFrame:
 
 
 def _fmp_shares(symbol: str) -> float:
-    """
-    Fetch shares outstanding from FMP /profile.
-
-    Raises FMPError when unavailable or non-positive.
-    """
     records = _fmp_get(f"/profile/{symbol}")
 
     if not isinstance(records, list) or not records:
@@ -283,7 +235,6 @@ def _fmp_shares(symbol: str) -> float:
     profile = records[0]
     shares  = profile.get("sharesOutstanding")
 
-    # Fall back to mktCap / price if sharesOutstanding is absent
     if not shares or shares <= 0:
         mkt   = profile.get("mktCap", 0)
         price = profile.get("price", 0)
@@ -291,15 +242,10 @@ def _fmp_shares(symbol: str) -> float:
             shares = mkt / price
 
     if not shares or shares <= 0:
-        raise FMPError(
-            f"FMP profile for '{symbol}' has no valid sharesOutstanding "
-            f"(got {profile.get('sharesOutstanding')!r})."
-        )
+        raise FMPError(f"FMP profile for '{symbol}' has no valid sharesOutstanding.")
 
     return float(shares)
 
-
-# ── FMP index constituent lists ───────────────────────────────────────────────
 
 _INDEX_PATHS: dict[str, str] = {
     "sp500":    "/sp500_constituent",
@@ -309,22 +255,10 @@ _INDEX_PATHS: dict[str, str] = {
 
 
 def fmp_index_constituents(index: str = "sp500") -> list[str]:
-    """
-    Return ticker symbols that are members of *index*.
-
-    index: "sp500" | "nasdaq" | "dowjones"
-
-    Returns an empty list (not an error) if FMP_API_KEY is absent or the
-    request fails — caller decides how to handle an empty result.
-    """
     if index not in _INDEX_PATHS:
-        raise ValueError(
-            f"Unknown index '{index}'. Choose from: {list(_INDEX_PATHS)}."
-        )
-
+        raise ValueError(f"Unknown index '{index}'. Choose from: {list(_INDEX_PATHS)}.")
     if not FMP_API_KEY:
         return []
-
     try:
         records = _fmp_get(_INDEX_PATHS[index])
         return [r["symbol"] for r in records if isinstance(r, dict) and "symbol" in r]
@@ -335,12 +269,8 @@ def fmp_index_constituents(index: str = "sp500") -> list[str]:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  yfinance — EXPLICIT SECONDARY FALLBACK
-#
-#  Rules:
-#    - Never call these functions directly from fetch_valuation_series().
-#    - Only call them from the _get_*() bridge functions below, after FMP has
-#      raised FMPError.
-#    - Every function logs a WARNING so operators know the fallback is active.
+#  Never call these directly from fetch_valuation_series().
+#  Only call from the bridge functions after FMP has failed.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _YF_NOT_FOUND = (
@@ -354,8 +284,6 @@ _YF_NOT_FOUND = (
 
 
 class _YFLogCapture(logging.Handler):
-    """Capture yfinance log lines to detect 'ticker not found' hints."""
-
     def __init__(self) -> None:
         super().__init__()
         self.messages: list[str] = []
@@ -368,12 +296,7 @@ class _YFLogCapture(logging.Handler):
 
 
 def _yf_history_safe(ticker: yf.Ticker, start_str: str, end_str: str) -> pd.DataFrame:
-    """
-    Fetch yfinance price history using ISO date strings.
-
-    Passing strings (not datetime objects) avoids timezone-handling edge cases
-    in some yfinance versions where naive datetime objects are misinterpreted.
-    """
+    """Fetch yfinance price history using ISO date strings."""
     capture = _YFLogCapture()
     yf_loggers = [
         logging.getLogger(n)
@@ -399,37 +322,24 @@ def _yf_history_safe(ticker: yf.Ticker, start_str: str, end_str: str) -> pd.Data
             lg.removeHandler(capture)
 
     if exc_caught is not None:
-        raise ValueError(
-            f"yfinance fetch failed for '{ticker.ticker}': {exc_caught}."
-        ) from exc_caught
+        raise ValueError(f"yfinance fetch failed for '{ticker.ticker}': {exc_caught}.") from exc_caught
 
     if capture.found_not_found_hint():
         raise ValueError(
-            f"yfinance: ticker '{ticker.ticker}' not found "
-            "(possibly invalid, delisted, or unavailable)."
+            f"yfinance: ticker '{ticker.ticker}' not found (possibly invalid or delisted)."
         )
 
     return hist
 
 
 def _yf_price_history(symbol: str, days: int) -> pd.Series:
-    """
-    yfinance price fallback.
-
-    Only call after FMP has raised FMPError.  Passes start/end as ISO strings
-    to guarantee yfinance honours the full requested date window.  Applies the
-    same coverage check as the FMP path so a short yfinance response surfaces
-    as a hard ValueError rather than silently plotting the wrong range.
-    """
-    logger.warning(
-        "[FALLBACK yfinance] Fetching price history for '%s' (%d days).", symbol, days
-    )
+    """yfinance price fallback. Only call after FMP has raised FMPError."""
+    logger.warning("[FALLBACK yfinance] price history for '%s' (%d days).", symbol, days)
 
     end_dt   = datetime.now()
     start_dt = end_dt - timedelta(days=days)
-
-    ticker = yf.Ticker(symbol)
-    hist   = _yf_history_safe(
+    ticker   = yf.Ticker(symbol)
+    hist     = _yf_history_safe(
         ticker,
         start_str=start_dt.strftime("%Y-%m-%d"),
         end_str=end_dt.strftime("%Y-%m-%d"),
@@ -442,8 +352,7 @@ def _yf_price_history(symbol: str, days: int) -> pd.Series:
         )
     if len(hist) < 5:
         raise ValueError(
-            f"yfinance returned only {len(hist)} trading day(s) for '{symbol}'. "
-            "Insufficient history."
+            f"yfinance returned only {len(hist)} trading day(s) for '{symbol}'."
         )
 
     s = hist["Close"]
@@ -453,22 +362,31 @@ def _yf_price_history(symbol: str, days: int) -> pd.Series:
 
 def _yf_quarterly_income(symbol: str) -> pd.DataFrame:
     """
-    yfinance quarterly income fallback. Only call after FMP has raised FMPError.
+    yfinance quarterly income fallback.
 
-    Returns a DataFrame indexed by period-end date with columns:
-      netIncome, revenue  (one or both may be NaN if yfinance lacks the data).
+    Tries quarterly_income_stmt first (the current yfinance API), then falls
+    back to quarterly_financials (legacy alias).  Uses whichever returns more
+    quarterly periods, since a larger history directly extends how far back the
+    TTM rolling window can reach and therefore how long the final metric series
+    will be.
     """
-    logger.warning(
-        "[FALLBACK yfinance] Fetching quarterly income for '%s'.", symbol
-    )
+    logger.warning("[FALLBACK yfinance] quarterly income for '%s'.", symbol)
     ticker = yf.Ticker(symbol)
 
-    try:
-        fin = ticker.quarterly_financials
-    except Exception as exc:
-        raise ValueError(
-            f"yfinance quarterly_financials failed for '{symbol}': {exc}."
-        ) from exc
+    # Try both attribute names; pick the one with more periods.
+    fin: pd.DataFrame | None = None
+    for attr in ("quarterly_income_stmt", "quarterly_financials"):
+        try:
+            candidate = getattr(ticker, attr, None)
+            if candidate is None:
+                continue
+            if hasattr(candidate, "empty") and candidate.empty:
+                continue
+            if fin is None or len(candidate.columns) > len(fin.columns):
+                fin = candidate
+                logger.debug("yfinance %s returned %d periods for %s", attr, len(candidate.columns), symbol)
+        except Exception as exc:
+            logger.debug("yfinance %s unavailable for %s: %s", attr, symbol, exc)
 
     if fin is None or fin.empty:
         raise ValueError(
@@ -477,7 +395,6 @@ def _yf_quarterly_income(symbol: str) -> pd.DataFrame:
         )
 
     fin.columns = _strip_tz(pd.to_datetime(fin.columns))
-    # quarterly_financials is metrics × periods; transpose to periods × metrics
     fin_t = fin.T.sort_index()
 
     ni_candidates  = ["Net Income", "Net Income Common Stockholders",
@@ -501,9 +418,7 @@ def _yf_quarterly_income(symbol: str) -> pd.DataFrame:
 
 def _yf_shares(symbol: str) -> float:
     """yfinance shares fallback. Only call after FMP has raised FMPError."""
-    logger.warning(
-        "[FALLBACK yfinance] Fetching shares outstanding for '%s'.", symbol
-    )
+    logger.warning("[FALLBACK yfinance] shares outstanding for '%s'.", symbol)
     ticker = yf.Ticker(symbol)
 
     try:
@@ -522,43 +437,37 @@ def _yf_shares(symbol: str) -> float:
     except Exception as exc:
         logger.debug("yfinance info shares unavailable for %s: %s", symbol, exc)
 
-    raise ValueError(
-        f"yfinance has no shares outstanding data for '{symbol}'."
-    )
+    raise ValueError(f"yfinance has no shares outstanding data for '{symbol}'.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Bridge functions — FMP first, explicit yfinance fallback
-#
-#  Each function returns (data, source_string).
-#  source_string is "fmp" when FMP succeeded, "yfinance" when the fallback ran.
+#  Bridge functions — FMP first, explicit yfinance fallback.
+#  Coverage is enforced here for the price series.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _get_price(symbol: str, days: int) -> tuple[pd.Series, str]:
     """
-    Fetch price history with mandatory period-coverage enforcement.
+    Fetch price history with coverage enforcement on the price series.
 
-    Flow:
-      1. Try FMP.  On FMPError OR if the returned series spans less than
-         _PERIOD_COVERAGE_THRESHOLD of the requested days → discard and fall
-         back to yfinance.
-      2. Try yfinance.  If the returned series also fails the coverage check
-         → raise ValueError (no further fallback exists).
+    If FMP fails OR its series spans < _PERIOD_COVERAGE_THRESHOLD of requested
+    days, discard it and fall back to yfinance.
+    If yfinance also returns too-short a series, raise ValueError.
 
-    This guarantees the caller never receives a silently truncated series
-    regardless of which provider is active.
+    NOTE: this check covers the PRICE series only.  The final metric series
+    is separately validated in fetch_valuation_series() after TTM computation.
     """
     min_days = int(days * _PERIOD_COVERAGE_THRESHOLD)
 
-    # ── 1. FMP attempt ────────────────────────────────────────────────────────
+    # ── 1. FMP ────────────────────────────────────────────────────────────────
     try:
         fmp_series = _fmp_price_history(symbol, days)
         actual = _series_span_days(fmp_series)
         if actual >= min_days:
+            logger.info("FMP price OK for '%s': %d days (need %d).", symbol, actual, min_days)
             return fmp_series, "fmp"
         logger.warning(
-            "FMP price for '%s' spans only %d days (need \u2265%d for this period). "
-            "Discarding and falling back to yfinance.",
+            "FMP price for '%s' spans only %d days (need \u2265%d). "
+            "Discarding — falling back to yfinance.",
             symbol, actual, min_days,
         )
     except FMPError as exc:
@@ -567,17 +476,18 @@ def _get_price(symbol: str, days: int) -> tuple[pd.Series, str]:
             symbol, exc,
         )
 
-    # ── 2. yfinance fallback ──────────────────────────────────────────────────
+    # ── 2. yfinance ───────────────────────────────────────────────────────────
     yf_series = _yf_price_history(symbol, days)
     actual = _series_span_days(yf_series)
     if actual < min_days:
         raise ValueError(
             f"Price data for '{symbol}' covers only {actual} calendar days "
-            f"({yf_series.index[0].date()} \u2192 {yf_series.index[-1].date()}), "
+            f"({pd.Timestamp(yf_series.index[0]).date()} \u2192 "
+            f"{pd.Timestamp(yf_series.index[-1]).date()}), "
             f"but the requested period needs \u2265{min_days} days "
-            f"({_PERIOD_COVERAGE_THRESHOLD:.0%} of {days} days requested). "
-            "Both FMP and yfinance returned insufficient history. "
-            "Try a shorter period or verify the ticker has adequate trading history."
+            f"({_PERIOD_COVERAGE_THRESHOLD:.0%} of {days}). "
+            "Both FMP and yfinance returned insufficient price history. "
+            "Try a shorter period."
         )
     return yf_series, "yfinance"
 
@@ -587,7 +497,7 @@ def _get_quarterly_income(symbol: str) -> tuple[pd.DataFrame, str]:
         return _fmp_quarterly_income(symbol), "fmp"
     except FMPError as exc:
         logger.warning(
-            "FMP income fetch failed for '%s' — using yfinance fallback. Reason: %s",
+            "FMP income fetch failed for '%s' — falling back to yfinance. Reason: %s",
             symbol, exc,
         )
     return _yf_quarterly_income(symbol), "yfinance"
@@ -598,7 +508,7 @@ def _get_shares(symbol: str) -> tuple[float, str]:
         return _fmp_shares(symbol), "fmp"
     except FMPError as exc:
         logger.warning(
-            "FMP shares fetch failed for '%s' — using yfinance fallback. Reason: %s",
+            "FMP shares fetch failed for '%s' — falling back to yfinance. Reason: %s",
             symbol, exc,
         )
     return _yf_shares(symbol), "yfinance"
@@ -685,11 +595,7 @@ def _build_result(
     )
 
     requested_days = PERIOD_DAYS[period]
-    actual_days = (
-        (pd.Timestamp(series.index[-1]) - pd.Timestamp(series.index[0])).days
-        if len(series) >= 2
-        else 0
-    )
+    actual_days    = _series_span_days(series)
 
     return {
         "symbol":  symbol,
@@ -710,22 +616,14 @@ def _build_result(
         "current": round(current, 4),
         "zscore":  round(zscore, 3),
         "summary": summary,
-        "source":  source,  # "fmp" | "yfinance" | "mixed"
-        # ── period debug ───────────────────────────────────────────────────
-        # These fields let callers verify the date range is what was requested.
-        # selected_period / start_date / end_date / point_count are displayed
-        # in the on-screen debug line by app.js.
-        # ── x-axis diagnostic fields ───────────────────────────────────────
-        # These are the exact values handed to Plotly's trace x-array.
-        # x_first5 / x_last5 let the UI prove whether the backend sent
-        # the right date range before any rendering or axis-zoom logic runs.
+        "source":  source,
         "debug": {
             "selected_period": period,
-            "start_date":      dates[0],
-            "end_date":        dates[-1],
             "requested_days":  requested_days,
             "actual_days":     actual_days,
-            "point_count":     len(series),
+            "start_date":      dates[0],
+            "end_date":        dates[-1],
+            "source":          source,
             "x_len":           len(dates),
             "x_min":           dates[0],
             "x_max":           dates[-1],
@@ -745,19 +643,14 @@ def fetch_valuation_series(
     """
     Fetch and return a historical valuation series for a ticker.
 
-    Data source priority
-    --------------------
-    1. FMP (primary)       — requires FMP_API_KEY env var.
-    2. yfinance (fallback) — used only when FMP fails; always logged at WARNING.
+    Coverage is validated at two levels:
+      1. _get_price(): price series span >= 70% of requested days.
+      2. Here, after TTM computation: final metric series span >= 70%.
+         This catches the case where prices are adequate but quarterly
+         fundamentals from yfinance (typically 5-6 quarters) limit the
+         P/E or P/S series to only ~1-2 quarters of TTM history.
 
-    Period enforcement
-    ------------------
-    Both price fetchers apply a coverage check: if the provider returns less
-    than _PERIOD_COVERAGE_THRESHOLD (75%) of the requested calendar days, the
-    response is rejected and the fallback (or an error) is triggered.  This
-    prevents FMP free-tier truncation from silently producing wrong date ranges.
-
-    Raises ValueError  for invalid input, unknown tickers, or unavailable data.
+    Raises ValueError  for invalid input, bad tickers, or insufficient coverage.
     Raises RuntimeError for unexpected pipeline failures.
     """
     symbol = validate_ticker(symbol)
@@ -765,9 +658,21 @@ def fetch_valuation_series(
     metric = validate_metric(metric)
     days   = PERIOD_DAYS[period]
 
-    logger.info("Fetching %s / %s / %s (%d days)", symbol, metric, period, days)
+    # ── API-level entry log ───────────────────────────────────────────────────
+    logger.info(
+        "REQUEST  symbol=%s  metric=%s  period=%s  requested_days=%d",
+        symbol, metric, period, days,
+    )
 
     price, price_src = _get_price(symbol, days)
+
+    logger.info(
+        "PRICE    symbol=%s  source=%s  span=%d days  points=%d  "
+        "start=%s  end=%s",
+        symbol, price_src, _series_span_days(price), len(price),
+        pd.Timestamp(price.index[0]).date(),
+        pd.Timestamp(price.index[-1]).date(),
+    )
 
     try:
         if metric == "trailing_pe":
@@ -787,6 +692,7 @@ def fetch_valuation_series(
 
     series = _clean_series(series, symbol, metric)
 
+    # Compute source label BEFORE the coverage check so it appears in error messages.
     all_sources = [price_src, *fund_sources]
     if all(s == "fmp"       for s in all_sources):
         source = "fmp"
@@ -795,12 +701,39 @@ def fetch_valuation_series(
     else:
         source = "mixed"
 
+    # ── Final series coverage check ───────────────────────────────────────────
+    # The price coverage check in _get_price is not sufficient on its own:
+    # yfinance quarterly_income_stmt typically returns only 5-6 quarters, so
+    # after the 4-quarter TTM rolling window and dropna() the metric series
+    # can start 1-2 quarters ago — even though 3+ years of prices exist.
+    # Example: 3y request → 3y of prices ✓ → but only 5 yfinance quarters →
+    #          TTM first valid in Q3 2025 → .dropna() leaves ~124 pts / 5 months.
+    # NOTE: reindex/ffill + dropna silently shrinks the series to the range
+    # covered by quarterly data; this check enforces the 70% floor explicitly.
+    final_span = _series_span_days(series)
+    min_final  = int(days * _PERIOD_COVERAGE_THRESHOLD)
+    if final_span < min_final:
+        raise ValueError(
+            f"{METRIC_LABELS[metric]} for '{symbol}' covers only {final_span} "
+            f"calendar days after TTM computation "
+            f"({pd.Timestamp(series.index[0]).date()} \u2192 "
+            f"{pd.Timestamp(series.index[-1]).date()}), "
+            f"but period '{period}' ({days} days) requires \u2265{min_final} days "
+            f"({_PERIOD_COVERAGE_THRESHOLD:.0%} threshold). "
+            f"Points: {len(series)}. Source: {source}. "
+            "The quarterly financial history is too limited for this period. "
+            "Set FMP_API_KEY for extended data (up to 44 quarters), or select a "
+            "shorter period."
+        )
+
+    # ── API-level response log ────────────────────────────────────────────────
     logger.info(
-        "OK %s/%s/%s: %d pts | current=%.2f | z=%+.2f | source=%s",
-        symbol, metric, period, len(series),
-        series.iloc[-1],
-        (series.iloc[-1] - series.mean()) / series.std(),
-        source,
+        "RESPONSE symbol=%s  source=%s  metric=%s  period=%s  "
+        "start=%s  end=%s  actual_days=%d  points=%d",
+        symbol, source, metric, period,
+        pd.Timestamp(series.index[0]).date(),
+        pd.Timestamp(series.index[-1]).date(),
+        final_span, len(series),
     )
 
     return _build_result(symbol, metric, period, series, source)

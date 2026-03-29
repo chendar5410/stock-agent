@@ -150,6 +150,8 @@ function _singleDiagHTML(dbg) {
       <span class="dlabel">actual_days:</span><span class="dval">${dbg.actual_days ?? "?"}</span>
       &nbsp;/&nbsp;
       <span class="dlabel">requested:</span><span class="dval">${dbg.requested_days ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">source:</span><span class="dval">${dbg.source ?? "?"}</span>
     </div>
     <div class="drow" style="margin-top:3px">
       <span class="dlabel">first 5 x:</span>&nbsp;<span class="dcode">${f5}</span>
@@ -420,6 +422,8 @@ function renderCompareChart(data) {
           <span class="dlabel">actual_days:</span><span class="dval">${d.actual_days ?? "?"}</span>
           &nbsp;/&nbsp;
           <span class="dlabel">req:</span><span class="dval">${d.requested_days ?? "?"}</span>
+          &nbsp;|&nbsp;
+          <span class="dlabel">source:</span><span class="dval">${d.source ?? "?"}</span>
         </div>
         <div class="drow"><span class="dlabel">first 5:</span>&nbsp;<span class="dcode">${f5}</span></div>
         <div class="drow"><span class="dlabel">last 5:&nbsp;</span><span class="dcode">${l5}</span></div>
