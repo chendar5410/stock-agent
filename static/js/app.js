@@ -189,7 +189,8 @@ singleForm.addEventListener("submit", async (e) => {
 
     // Show debug line with exactly what was computed.
     singleDebug.textContent =
-      `${data.symbol} | ${data.metric} | ${data.period} | ${data.points} pts`;
+      `${data.symbol} | ${data.metric} | ${data.period} | ${data.points} pts | src: ${data.source || "?"}`;
+
     singleDebug.style.display = "block";
 
     renderSingleChart(data);
@@ -296,8 +297,9 @@ compareForm.addEventListener("submit", async (e) => {
     const ptsSummary = data.results
       .map(r => `${r.symbol}:${r.points}pts`)
       .join(", ");
+    const srcSet = [...new Set(data.results.map(r => r.source || "?"))].join("+");
     compareDebug.textContent =
-      `${rawTickers.join(", ")} | ${data.metric} | ${data.period} | ${ptsSummary}`;
+      `${rawTickers.join(", ")} | ${data.metric} | ${data.period} | ${ptsSummary} | src: ${srcSet}`;
     compareDebug.style.display = "block";
 
     renderCompareChart(data);

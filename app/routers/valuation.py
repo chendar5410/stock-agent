@@ -53,16 +53,17 @@ async def get_valuation_chart(
 
     chart_json = build_single_chart(data)
     return {
-        "chart": chart_json,
-        "symbol": data["symbol"],
-        "metric": data["metric"],      # exact metric key that was computed
-        "label": data["label"],        # human-readable label used in the chart title
-        "period": data["period"],      # exact period that was used
-        "points": data["points"],      # number of data points in the returned series
+        "chart":   chart_json,
+        "symbol":  data["symbol"],
+        "metric":  data["metric"],   # exact metric key that was computed
+        "label":   data["label"],    # human-readable label used in chart title
+        "period":  data["period"],   # exact period that was used
+        "points":  data["points"],   # number of data points in the series
         "current": data["current"],
-        "zscore": data["zscore"],
-        "stats": data["stats"],
+        "zscore":  data["zscore"],
+        "stats":   data["stats"],
         "summary": data["summary"],
+        "source":  data["source"],   # "fmp" | "yfinance" | "mixed"
     }
 
 
@@ -121,20 +122,21 @@ async def get_compare_charts(
 
     chart_json = build_compare_charts(results)
     return {
-        "chart": chart_json,
-        "metric": metric,
-        "period": period,
+        "chart":   chart_json,
+        "metric":  metric,
+        "period":  period,
         "results": [
             {
-                "symbol": d["symbol"],
-                "label": d["label"],
-                "metric": d["metric"],
-                "period": d["period"],
-                "points": d["points"],
+                "symbol":  d["symbol"],
+                "label":   d["label"],
+                "metric":  d["metric"],
+                "period":  d["period"],
+                "points":  d["points"],
                 "current": d["current"],
-                "zscore": d["zscore"],
+                "zscore":  d["zscore"],
                 "summary": d["summary"],
-                "stats": d["stats"],
+                "stats":   d["stats"],
+                "source":  d["source"],  # "fmp" | "yfinance" | "mixed"
             }
             for d in results
         ],
