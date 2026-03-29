@@ -391,16 +391,20 @@ _NI_COLS  = [
 _REV_COLS = ["Total Revenue", "Revenue", "Net Revenue"]
 
 
-def _yf_extract_ni_rev(fin_t: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-    """Extract net-income and revenue from a transposed yfinance income statement."""
-    ni_col  = next((c for c in _NI_COLS  if c in fin_t.columns), None)
-    rev_col = next((c for c in _REV_COLS if c in fin_t.columns), None)
-    # ── TRACE: show every available column so we can spot name mismatches ──────
-    print(f"  [extract] all_cols={list(fin_t.columns)}")
-    print(f"  [extract] ni_col_matched={ni_col}  rev_col_matched={rev_col}")
+def _yf_extract_ni_rev(fin: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Extract net-income and revenue from a yfinance income statement.
+
+    ``fin`` is the raw (non-transposed) DataFrame: rows = metric names
+    (fin.index), columns = period-end dates (fin.columns).
+    """
+    ni_row  = next((r for r in _NI_COLS  if r in fin.index), None)
+    rev_row = next((r for r in _REV_COLS if r in fin.index), None)
+    # ── TRACE ──────────────────────────────────────────────────────────────────
+    print(f"  [extract] all_rows={list(fin.index)}")
+    print(f"  [extract] ni_row_matched={ni_row}  rev_row_matched={rev_row}")
     # ───────────────────────────────────────────────────────────────────────────
-    ni  = fin_t[ni_col].dropna()  if ni_col  else pd.Series(dtype=float)
-    rev = fin_t[rev_col].dropna() if rev_col else pd.Series(dtype=float)
+    ni  = fin.loc[ni_row].dropna().sort_index()  if ni_row  else pd.Series(dtype=float)
+    rev = fin.loc[rev_row].dropna().sort_index() if rev_row else pd.Series(dtype=float)
     return ni, rev
 
 
@@ -432,8 +436,7 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
                 print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr}: empty/None")
                 continue
             fin.columns = _strip_tz(pd.to_datetime(fin.columns))
-            fin_t = fin.T.sort_index()
-            ni, rev = _yf_extract_ni_rev(fin_t)
+            ni, rev = _yf_extract_ni_rev(fin)
             # ── TRACE ─────────────────────────────────────────────────────────
             print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr}")
             print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
@@ -467,8 +470,7 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
                 print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr}: empty/None")
                 continue
             fin.columns = _strip_tz(pd.to_datetime(fin.columns))
-            fin_t = fin.T.sort_index()
-            ni, rev = _yf_extract_ni_rev(fin_t)
+            ni, rev = _yf_extract_ni_rev(fin)
             # ── TRACE ─────────────────────────────────────────────────────────
             print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr}")
             print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
