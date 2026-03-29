@@ -187,9 +187,10 @@ singleForm.addEventListener("submit", async (e) => {
 
     hideStatus(singleStatus);
 
-    // Show debug line with exactly what was computed.
+    // Show debug line: selected_period | start_date | end_date | point_count
+    const dbg = data.debug || {};
     singleDebug.textContent =
-      `${data.symbol} | ${data.metric} | ${data.period} | ${data.points} pts | src: ${data.source || "?"}`;
+      `${dbg.selected_period || data.period} | ${dbg.start_date || "?"} \u2192 ${dbg.end_date || "?"} | ${dbg.point_count ?? data.points} pts | src: ${data.source || "?"}`;
 
     singleDebug.style.display = "block";
 
@@ -297,9 +298,14 @@ compareForm.addEventListener("submit", async (e) => {
     const ptsSummary = data.results
       .map(r => `${r.symbol}:${r.points}pts`)
       .join(", ");
+    // Debug line: selected_period | start_date → end_date | per-ticker pts | src
     const srcSet = [...new Set(data.results.map(r => r.source || "?"))].join("+");
+    const rangeStr = data.results.map(r => {
+      const d = r.debug || {};
+      return `${r.symbol}: ${d.start_date || "?"}\u2192${d.end_date || "?"}`;
+    }).join(" | ");
     compareDebug.textContent =
-      `${rawTickers.join(", ")} | ${data.metric} | ${data.period} | ${ptsSummary} | src: ${srcSet}`;
+      `${data.period} | ${rangeStr} | ${ptsSummary} | src: ${srcSet}`;
     compareDebug.style.display = "block";
 
     renderCompareChart(data);

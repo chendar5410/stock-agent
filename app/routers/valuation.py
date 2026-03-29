@@ -64,6 +64,9 @@ async def get_valuation_chart(
         "stats":   data["stats"],
         "summary": data["summary"],
         "source":  data["source"],   # "fmp" | "yfinance" | "mixed"
+        # debug: period coverage verification fields
+        # selected_period | start_date | end_date | point_count
+        "debug":   data["debug"],
     }
 
 
@@ -136,7 +139,8 @@ async def get_compare_charts(
                 "zscore":  d["zscore"],
                 "summary": d["summary"],
                 "stats":   d["stats"],
-                "source":  d["source"],  # "fmp" | "yfinance" | "mixed"
+                "source":  d["source"],   # "fmp" | "yfinance" | "mixed"
+                "debug":   d["debug"],    # selected_period | start_date | end_date | point_count
             }
             for d in results
         ],

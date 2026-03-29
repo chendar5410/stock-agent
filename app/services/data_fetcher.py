@@ -62,6 +62,13 @@ VALID_METRICS = frozenset(METRIC_LABELS.keys())
 _TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 REQUEST_TIMEOUT = 20  # seconds
 
+# A provider must return at least this fraction of the requested calendar days.
+# Below this threshold we treat the response as truncated and raise an error.
+# FMP free/developer keys silently return only ~5 months regardless of from/to;
+# this check converts that silent truncation into an explicit error so the
+# yfinance fallback (or the user) knows what happened.
+_PERIOD_COVERAGE_THRESHOLD = 0.75
+
 
 # ── Input validation ──────────────────────────────────────────────────────────
 
@@ -126,11 +133,48 @@ def _clean_series(series: pd.Series, symbol: str, metric: str) -> pd.Series:
     return series
 
 
+def _check_price_coverage(
+    series: pd.Series,
+    requested_days: int,
+    symbol: str,
+    *,
+    exc_type: type,
+) -> None:
+    """
+    Raise exc_type if the returned series covers materially less than requested.
+
+    Pass exc_type=FMPError to trigger the yfinance fallback.
+    Pass exc_type=ValueError to surface a hard error to the caller.
+
+    Root cause this guards against: FMP free/developer keys silently return
+    only the most recent ~5 months from /historical-price-full regardless of
+    the from= and to= query parameters.  Without this check every period
+    renders the same ~5-month window.
+    """
+    if series.empty:
+        return  # empty-series errors are handled separately
+
+    actual_start = pd.Timestamp(series.index[0])
+    actual_end   = pd.Timestamp(series.index[-1])
+    actual_days  = (actual_end - actual_start).days
+    min_days     = int(requested_days * _PERIOD_COVERAGE_THRESHOLD)
+
+    if actual_days < min_days:
+        raise exc_type(
+            f"Price history for '{symbol}' spans only {actual_days} calendar days "
+            f"({actual_start.date()} \u2192 {actual_end.date()}), "
+            f"but the requested period needs at least {min_days} days "
+            f"({requested_days} \u00d7 {_PERIOD_COVERAGE_THRESHOLD:.0%} threshold). "
+            "The data provider may be limiting historical depth due to subscription tier. "
+            "Try a shorter period, or verify the ticker has sufficient trading history."
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  FMP — PRIMARY DATA SOURCE
 #
 #  Endpoint map:
-#    prices      GET /historical-price-full/{symbol}?from=&to=&serietype=line
+#    prices      GET /historical-price-full/{symbol}?from=YYYY-MM-DD&to=YYYY-MM-DD&serietype=line
 #    income      GET /income-statement/{symbol}?period=quarter&limit=44
 #    profile     GET /profile/{symbol}               (shares outstanding)
 #    index lists GET /sp500_constituent | /nasdaq_constituent | /dowjones_constituent
@@ -180,16 +224,21 @@ def _fmp_price_history(symbol: str, days: int) -> pd.Series:
     """
     Fetch daily closing prices from FMP /historical-price-full.
 
-    Raises FMPError when data is unavailable or the response structure is wrong.
+    Raises FMPError when:
+      - API key is absent or invalid
+      - Response structure is unexpected
+      - Returned date range is less than _PERIOD_COVERAGE_THRESHOLD of requested days
+        (FMP free/developer keys truncate to ~5 months regardless of from/to params)
     """
-    end_dt = datetime.now()
+    end_dt   = datetime.now()
     start_dt = end_dt - timedelta(days=days)
 
+    # Use ISO date strings; FMP does not accept datetime objects.
     data = _fmp_get(
         f"/historical-price-full/{symbol}",
         {
             "from": start_dt.strftime("%Y-%m-%d"),
-            "to": end_dt.strftime("%Y-%m-%d"),
+            "to":   end_dt.strftime("%Y-%m-%d"),
             "serietype": "line",
         },
     )
@@ -217,6 +266,10 @@ def _fmp_price_history(symbol: str, days: int) -> pd.Series:
             f"FMP returned only {len(series)} price point(s) for '{symbol}'. "
             "Insufficient history."
         )
+
+    # Hard coverage check — raises FMPError to trigger yfinance fallback when FMP
+    # silently truncates the date range (common on free/developer subscription tiers).
+    _check_price_coverage(series, days, symbol, exc_type=FMPError)
 
     return series
 
@@ -264,11 +317,11 @@ def _fmp_shares(symbol: str) -> float:
         raise FMPError(f"FMP /profile/{symbol} returned no data.")
 
     profile = records[0]
-    shares = profile.get("sharesOutstanding")
+    shares  = profile.get("sharesOutstanding")
 
     # Fall back to mktCap / price if sharesOutstanding is absent
     if not shares or shares <= 0:
-        mkt = profile.get("mktCap", 0)
+        mkt   = profile.get("mktCap", 0)
         price = profile.get("price", 0)
         if mkt > 0 and price > 0:
             shares = mkt / price
@@ -350,7 +403,13 @@ class _YFLogCapture(logging.Handler):
         return any(kw in msg for msg in self.messages for kw in _YF_NOT_FOUND)
 
 
-def _yf_history_safe(ticker: yf.Ticker, days: int) -> pd.DataFrame:
+def _yf_history_safe(ticker: yf.Ticker, start_str: str, end_str: str) -> pd.DataFrame:
+    """
+    Fetch yfinance price history using ISO date strings.
+
+    Passing strings (not datetime objects) avoids timezone-handling edge cases
+    in some yfinance versions where naive datetime objects are misinterpreted.
+    """
     capture = _YFLogCapture()
     yf_loggers = [
         logging.getLogger(n)
@@ -359,13 +418,15 @@ def _yf_history_safe(ticker: yf.Ticker, days: int) -> pd.DataFrame:
     for lg in yf_loggers:
         lg.addHandler(capture)
 
-    end_dt, start_dt = datetime.now(), datetime.now() - timedelta(days=days)
     hist: pd.DataFrame = pd.DataFrame()
     exc_caught: Exception | None = None
 
     try:
         hist = ticker.history(
-            start=start_dt, end=end_dt, auto_adjust=True, timeout=REQUEST_TIMEOUT
+            start=start_str,
+            end=end_str,
+            auto_adjust=True,
+            timeout=REQUEST_TIMEOUT,
         )
     except Exception as exc:
         exc_caught = exc
@@ -388,12 +449,27 @@ def _yf_history_safe(ticker: yf.Ticker, days: int) -> pd.DataFrame:
 
 
 def _yf_price_history(symbol: str, days: int) -> pd.Series:
-    """yfinance price fallback. Only call after FMP has raised FMPError."""
+    """
+    yfinance price fallback.
+
+    Only call after FMP has raised FMPError.  Passes start/end as ISO strings
+    to guarantee yfinance honours the full requested date window.  Applies the
+    same coverage check as the FMP path so a short yfinance response surfaces
+    as a hard ValueError rather than silently plotting the wrong range.
+    """
     logger.warning(
         "[FALLBACK yfinance] Fetching price history for '%s' (%d days).", symbol, days
     )
+
+    end_dt   = datetime.now()
+    start_dt = end_dt - timedelta(days=days)
+
     ticker = yf.Ticker(symbol)
-    hist = _yf_history_safe(ticker, days)
+    hist   = _yf_history_safe(
+        ticker,
+        start_str=start_dt.strftime("%Y-%m-%d"),
+        end_str=end_dt.strftime("%Y-%m-%d"),
+    )
 
     if hist.empty:
         raise ValueError(
@@ -408,6 +484,11 @@ def _yf_price_history(symbol: str, days: int) -> pd.Series:
 
     s = hist["Close"]
     s.index = _strip_tz(s.index)
+
+    # Hard coverage check — raises ValueError (not FMPError) because there is no
+    # further fallback after yfinance.  The error surfaces as HTTP 422.
+    _check_price_coverage(s, days, symbol, exc_type=ValueError)
+
     return s
 
 
@@ -475,7 +556,7 @@ def _yf_shares(symbol: str) -> float:
         logger.debug("yfinance fast_info shares unavailable for %s: %s", symbol, exc)
 
     try:
-        info = ticker.info
+        info   = ticker.info
         shares = info.get("sharesOutstanding") or info.get("impliedSharesOutstanding")
         if shares and shares > 0:
             return float(shares)
@@ -594,11 +675,11 @@ def _price_sales_series(
 def _build_result(
     symbol: str, metric: str, period: str, series: pd.Series, source: str
 ) -> dict:
-    label = METRIC_LABELS[metric]
-    mean = float(series.mean())
-    std  = float(series.std())
+    label   = METRIC_LABELS[metric]
+    mean    = float(series.mean())
+    std     = float(series.std())
     current = float(series.iloc[-1])
-    zscore = (current - mean) / std if std > 0 else 0.0
+    zscore  = (current - mean) / std if std > 0 else 0.0
     summary = _generate_summary(symbol, label, period, mean, std, current, zscore)
 
     dates = (
@@ -607,14 +688,21 @@ def _build_result(
         else [str(d) for d in series.index]
     )
 
+    requested_days = PERIOD_DAYS[period]
+    actual_days = (
+        (pd.Timestamp(series.index[-1]) - pd.Timestamp(series.index[0])).days
+        if len(series) >= 2
+        else 0
+    )
+
     return {
-        "symbol": symbol,
-        "metric": metric,
-        "label": label,
-        "period": period,
-        "points": len(series),
-        "dates": dates,
-        "values": [round(v, 4) for v in series.tolist()],
+        "symbol":  symbol,
+        "metric":  metric,
+        "label":   label,
+        "period":  period,
+        "points":  len(series),
+        "dates":   dates,
+        "values":  [round(v, 4) for v in series.tolist()],
         "stats": {
             "mean":   round(mean, 4),
             "std":    round(std, 4),
@@ -626,7 +714,19 @@ def _build_result(
         "current": round(current, 4),
         "zscore":  round(zscore, 3),
         "summary": summary,
-        "source":  source,   # "fmp" | "yfinance" | "mixed"
+        "source":  source,  # "fmp" | "yfinance" | "mixed"
+        # ── period debug ───────────────────────────────────────────────────
+        # These fields let callers verify the date range is what was requested.
+        # selected_period / start_date / end_date / point_count are displayed
+        # in the on-screen debug line by app.js.
+        "debug": {
+            "selected_period": period,
+            "start_date":      dates[0],
+            "end_date":        dates[-1],
+            "requested_days":  requested_days,
+            "actual_days":     actual_days,
+            "point_count":     len(series),
+        },
     }
 
 
@@ -642,13 +742,15 @@ def fetch_valuation_series(
 
     Data source priority
     --------------------
-    1. FMP (primary)      — requires FMP_API_KEY env var.
+    1. FMP (primary)       — requires FMP_API_KEY env var.
     2. yfinance (fallback) — used only when FMP fails; always logged at WARNING.
 
-    The returned dict includes a ``source`` key:
-      "fmp"      — all data came from FMP.
-      "yfinance" — all data came from yfinance.
-      "mixed"    — price and fundamentals came from different sources.
+    Period enforcement
+    ------------------
+    Both price fetchers apply a coverage check: if the provider returns less
+    than _PERIOD_COVERAGE_THRESHOLD (75%) of the requested calendar days, the
+    response is rejected and the fallback (or an error) is triggered.  This
+    prevents FMP free-tier truncation from silently producing wrong date ranges.
 
     Raises ValueError  for invalid input, unknown tickers, or unavailable data.
     Raises RuntimeError for unexpected pipeline failures.
@@ -681,7 +783,7 @@ def fetch_valuation_series(
     series = _clean_series(series, symbol, metric)
 
     all_sources = [price_src, *fund_sources]
-    if all(s == "fmp"      for s in all_sources):
+    if all(s == "fmp"       for s in all_sources):
         source = "fmp"
     elif all(s == "yfinance" for s in all_sources):
         source = "yfinance"
