@@ -719,6 +719,10 @@ def _build_result(
         # These fields let callers verify the date range is what was requested.
         # selected_period / start_date / end_date / point_count are displayed
         # in the on-screen debug line by app.js.
+        # ── x-axis diagnostic fields ───────────────────────────────────────
+        # These are the exact values handed to Plotly's trace x-array.
+        # x_first5 / x_last5 let the UI prove whether the backend sent
+        # the right date range before any rendering or axis-zoom logic runs.
         "debug": {
             "selected_period": period,
             "start_date":      dates[0],
@@ -726,6 +730,11 @@ def _build_result(
             "requested_days":  requested_days,
             "actual_days":     actual_days,
             "point_count":     len(series),
+            "x_len":           len(dates),
+            "x_min":           dates[0],
+            "x_max":           dates[-1],
+            "x_first5":        dates[:5],
+            "x_last5":         dates[-5:],
         },
     }
 

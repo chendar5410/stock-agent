@@ -21,6 +21,27 @@
       margin: 6px 0 0 0;
       letter-spacing: 0.02em;
     }
+    /* ── Period diagnostic panel ─────────────────────────────────────────
+       Visible box under the chart showing the exact x-values sent to
+       Plotly — used to determine whether truncation is in the data layer
+       or the rendering layer before any fix is applied.              */
+    .diag-panel {
+      display: none;
+      font-family: monospace;
+      font-size: 11px;
+      line-height: 1.7;
+      color: #c9d1d9;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-left: 3px solid #58a6ff;
+      border-radius: 4px;
+      padding: 8px 14px;
+      margin: 8px 0 4px 0;
+    }
+    .diag-panel .drow { display: flex; gap: 6px; flex-wrap: wrap; }
+    .diag-panel .dlabel { color: #8b949e; }
+    .diag-panel .dval   { color: #f78166; font-weight: 600; }
+    .diag-panel .dcode  { color: #3fb950; }
   </style>
 </head>
 <body>
@@ -78,6 +99,11 @@
       <div class="chart-wrap">
         <div id="chart-div"></div>
       </div>
+
+      <!-- Period diagnostic panel: x_len / x_min / x_max / x_first5 / x_last5
+           Visible after every successful fetch so you can verify the exact
+           date range sent to Plotly before assuming rendering is correct. -->
+      <div id="single-diag" class="diag-panel"></div>
 
       <!-- z-score gauge bar -->
       <div id="zscore-bar-wrap" class="zscore-bar-wrap" style="display:none">
@@ -150,6 +176,9 @@
         <div id="compare-div"></div>
       </div>
 
+      <!-- Per-ticker period diagnostic panel for compare -->
+      <div id="compare-diag" class="diag-panel"></div>
+
       <div id="compare-table" style="margin-top:16px"></div>
 
     </div><!-- /panel-compare -->
@@ -220,6 +249,6 @@
   </main>
 </div>
 
-<script src="/static/js/app.js?v=4"></script>
+<script src="/static/js/app.js?v=5"></script>
 </body>
 </html>

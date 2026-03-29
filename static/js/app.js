@@ -106,6 +106,59 @@ function showStatus(el, type, msg) {
 }
 function hideStatus(el) { el.style.display = "none"; }
 
+// ── Diagnostic helpers ────────────────────────────────────────────────────
+/**
+ * Log every Plotly trace's x-array to the console before rendering.
+ * This is the ground truth for what Plotly will actually draw — if the
+ * x-range looks wrong here, the bug is upstream (data or serialisation).
+ * If it looks correct here but the chart still shows the wrong range, the
+ * bug is in Plotly axis config or an incremental-update artifact.
+ */
+function _logPlotlyTraces(fig, label) {
+  console.group(`[Period diagnostic] ${label} — Plotly traces before render`);
+  fig.data.forEach((trace, i) => {
+    if (!Array.isArray(trace.x)) return;
+    console.log(
+      `  trace[${i}]`,
+      `name="${trace.name || ""}"`,
+      `mode="${trace.mode || ""}"`,
+      `fill="${trace.fill || ""}"`,
+      `x.length=${trace.x.length}`,
+      `x[0]="${trace.x[0]}"`,
+      `x[-1]="${trace.x[trace.x.length - 1]}"`
+    );
+  });
+  console.groupEnd();
+}
+
+/**
+ * Build the HTML content for a single-ticker diag panel.
+ */
+function _singleDiagHTML(dbg) {
+  const f5 = (dbg.x_first5 || []).join(", ") || "—";
+  const l5 = (dbg.x_last5  || []).join(", ") || "—";
+  return `
+    <div class="drow">
+      <span class="dlabel">period:</span><span class="dval">${dbg.selected_period ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">x_min:</span><span class="dval">${dbg.x_min ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">x_max:</span><span class="dval">${dbg.x_max ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">x_len:</span><span class="dval">${dbg.x_len ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">actual_days:</span><span class="dval">${dbg.actual_days ?? "?"}</span>
+      &nbsp;/&nbsp;
+      <span class="dlabel">requested:</span><span class="dval">${dbg.requested_days ?? "?"}</span>
+    </div>
+    <div class="drow" style="margin-top:3px">
+      <span class="dlabel">first 5 x:</span>&nbsp;<span class="dcode">${f5}</span>
+    </div>
+    <div class="drow">
+      <span class="dlabel">last 5 x:&nbsp;</span><span class="dcode">${l5}</span>
+    </div>`;
+}
+
 // ── NAV ───────────────────────────────────────────────────────────────────
 document.querySelectorAll("nav button[data-panel]").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -124,6 +177,7 @@ const singleMetric  = document.getElementById("single-metric");
 const singlePeriod  = document.getElementById("single-period");
 const singleStatus  = document.getElementById("single-status");
 const singleDebug   = document.getElementById("single-debug");
+const singleDiag    = document.getElementById("single-diag");
 const chartDiv      = document.getElementById("chart-div");
 const summaryBox    = document.getElementById("summary-box");
 const summaryText   = document.getElementById("summary-text");
@@ -133,13 +187,15 @@ const zscoreBarWrap = document.getElementById("zscore-bar-wrap");
 // Unconditionally destroy every piece of single-chart output.
 function clearSingleChart() {
   Plotly.purge(chartDiv);
-  chartDiv.innerHTML = "";
+  chartDiv.innerHTML         = "";
+  singleDiag.style.display  = "none";
+  singleDiag.innerHTML      = "";
   zscoreBarWrap.style.display = "none";
-  summaryBox.style.display = "none";
-  summaryText.innerHTML = "";
-  statPills.innerHTML = "";
-  singleDebug.style.display = "none";
-  singleDebug.textContent = "";
+  summaryBox.style.display   = "none";
+  summaryText.innerHTML      = "";
+  statPills.innerHTML        = "";
+  singleDebug.style.display  = "none";
+  singleDebug.textContent    = "";
 }
 
 singleForm.addEventListener("submit", async (e) => {
@@ -187,11 +243,10 @@ singleForm.addEventListener("submit", async (e) => {
 
     hideStatus(singleStatus);
 
-    // Show debug line: selected_period | start_date | end_date | point_count
+    // Debug line: period | start → end | pts | src
     const dbg = data.debug || {};
     singleDebug.textContent =
       `${dbg.selected_period || data.period} | ${dbg.start_date || "?"} \u2192 ${dbg.end_date || "?"} | ${dbg.point_count ?? data.points} pts | src: ${data.source || "?"}`;
-
     singleDebug.style.display = "block";
 
     renderSingleChart(data);
@@ -203,7 +258,27 @@ singleForm.addEventListener("submit", async (e) => {
 
 function renderSingleChart(data) {
   const fig = JSON.parse(data.chart);
+
+  // ── Step 1: log every trace's x-array BEFORE touching the DOM ────────
+  // If x.length and x[0]/x[-1] are correct here, the data pipeline is fine
+  // and any visual problem is a rendering artifact.  If they are wrong here,
+  // the bug is in the backend serialisation or the chart builder.
+  _logPlotlyTraces(fig, `${data.symbol} ${data.period}`);
+
+  // ── Step 2: explicit purge — ensures no incremental Plotly update path ─
+  // clearSingleChart() already calls purge, but the async gap between that
+  // and this render means a second explicit purge guarantees a clean slate.
+  Plotly.purge(chartDiv);
+
+  // ── Step 3: create the chart from scratch ─────────────────────────────
   Plotly.newPlot(chartDiv, fig.data, fig.layout, PLOTLY_CFG);
+
+  // ── Step 4: populate the visible diagnostic panel ─────────────────────
+  // Shows x_len / x_min / x_max / first-5 / last-5 under the chart so
+  // you can verify the date range without opening DevTools.
+  const dbg = data.debug || {};
+  singleDiag.innerHTML = _singleDiagHTML(dbg);
+  singleDiag.style.display = "block";
 
   const z = data.zscore;
   const [label, cls] = zBadge(z);
@@ -237,15 +312,18 @@ const compareMetric  = document.getElementById("compare-metric");
 const comparePeriod  = document.getElementById("compare-period");
 const compareStatus  = document.getElementById("compare-status");
 const compareDebug   = document.getElementById("compare-debug");
+const compareDiag    = document.getElementById("compare-diag");
 const compareDiv     = document.getElementById("compare-div");
 const compareTable   = document.getElementById("compare-table");
 
 function clearCompareChart() {
   Plotly.purge(compareDiv);
-  compareDiv.innerHTML = "";
-  compareTable.innerHTML = "";
+  compareDiv.innerHTML        = "";
+  compareTable.innerHTML      = "";
+  compareDiag.style.display  = "none";
+  compareDiag.innerHTML      = "";
   compareDebug.style.display = "none";
-  compareDebug.textContent = "";
+  compareDebug.textContent   = "";
 }
 
 compareForm.addEventListener("submit", async (e) => {
@@ -294,12 +372,9 @@ compareForm.addEventListener("submit", async (e) => {
       compareStatus.style.display = "";
     }
 
-    // Debug line: list all tickers, the metric, period, and per-ticker point counts.
-    const ptsSummary = data.results
-      .map(r => `${r.symbol}:${r.points}pts`)
-      .join(", ");
-    // Debug line: selected_period | start_date → end_date | per-ticker pts | src
-    const srcSet = [...new Set(data.results.map(r => r.source || "?"))].join("+");
+    // Debug line: period | per-ticker date ranges | pts | src
+    const srcSet   = [...new Set(data.results.map(r => r.source || "?"))].join("+");
+    const ptsSummary = data.results.map(r => `${r.symbol}:${r.points}pts`).join(", ");
     const rangeStr = data.results.map(r => {
       const d = r.debug || {};
       return `${r.symbol}: ${d.start_date || "?"}\u2192${d.end_date || "?"}`;
@@ -317,7 +392,41 @@ compareForm.addEventListener("submit", async (e) => {
 
 function renderCompareChart(data) {
   const fig = JSON.parse(data.chart);
+
+  // ── Step 1: log all traces before render ─────────────────────────────
+  _logPlotlyTraces(fig, `compare ${data.period}`);
+
+  // ── Step 2: explicit purge before new chart ───────────────────────────
+  Plotly.purge(compareDiv);
+
+  // ── Step 3: create chart from scratch ────────────────────────────────
   Plotly.newPlot(compareDiv, fig.data, fig.layout, PLOTLY_CFG);
+
+  // ── Step 4: populate per-ticker diagnostic panel ──────────────────────
+  const diagRows = data.results.map(r => {
+    const d = r.debug || {};
+    const f5 = (d.x_first5 || []).join(", ") || "—";
+    const l5 = (d.x_last5  || []).join(", ") || "—";
+    return `
+      <div style="margin-bottom:6px;border-bottom:1px solid #21262d;padding-bottom:6px">
+        <div class="drow">
+          <span class="dval">${r.symbol}</span>&nbsp;
+          <span class="dlabel">x_len:</span><span class="dval">${d.x_len ?? "?"}</span>
+          &nbsp;|&nbsp;
+          <span class="dlabel">x_min:</span><span class="dval">${d.x_min ?? "?"}</span>
+          &nbsp;|&nbsp;
+          <span class="dlabel">x_max:</span><span class="dval">${d.x_max ?? "?"}</span>
+          &nbsp;|&nbsp;
+          <span class="dlabel">actual_days:</span><span class="dval">${d.actual_days ?? "?"}</span>
+          &nbsp;/&nbsp;
+          <span class="dlabel">req:</span><span class="dval">${d.requested_days ?? "?"}</span>
+        </div>
+        <div class="drow"><span class="dlabel">first 5:</span>&nbsp;<span class="dcode">${f5}</span></div>
+        <div class="drow"><span class="dlabel">last 5:&nbsp;</span><span class="dcode">${l5}</span></div>
+      </div>`;
+  }).join("");
+  compareDiag.innerHTML = diagRows;
+  compareDiag.style.display = "block";
 
   const rows = data.results
     .slice()
