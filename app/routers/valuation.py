@@ -4,11 +4,13 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from app.services.chart_builder import build_compare_charts, build_single_chart
 from app.services.data_fetcher import (
     VALID_METRICS,
     VALID_PERIODS,
+    InsufficientCoverageError,
     fetch_valuation_series,
     validate_metric,
     validate_period,
@@ -41,6 +43,9 @@ async def get_valuation_chart(
 
     try:
         data = fetch_valuation_series(ticker, metric, period)
+    except InsufficientCoverageError as exc:
+        logger.warning("Coverage too short for %s/%s/%s: %s", ticker, metric, period, exc)
+        return JSONResponse(status_code=422, content={"detail": str(exc), "debug": exc.debug})
     except ValueError as exc:
         logger.warning("Data unavailable for %s/%s/%s: %s", ticker, metric, period, exc)
         raise HTTPException(status_code=422, detail=str(exc))

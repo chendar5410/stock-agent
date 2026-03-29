@@ -148,6 +148,18 @@ class FMPError(Exception):
     """Raised when FMP cannot return usable data."""
 
 
+class InsufficientCoverageError(ValueError):
+    """Raised when the final metric series is too short for the requested period.
+
+    Carries a ``debug`` dict so callers (e.g. the router) can surface structured
+    diagnostic information to the client without parsing the error message string.
+    """
+
+    def __init__(self, message: str, debug: dict) -> None:
+        super().__init__(message)
+        self.debug = debug
+
+
 def _fmp_get(path: str, params: dict | None = None) -> object:
     if not FMP_API_KEY:
         raise FMPError("FMP_API_KEY is not configured.")
@@ -619,8 +631,10 @@ def _build_result(
         "source":  source,
         "debug": {
             "selected_period": period,
+            "metric":          metric,
             "requested_days":  requested_days,
             "actual_days":     actual_days,
+            "point_count":     len(series),
             "start_date":      dates[0],
             "end_date":        dates[-1],
             "source":          source,
@@ -710,20 +724,34 @@ def fetch_valuation_series(
     #          TTM first valid in Q3 2025 → .dropna() leaves ~124 pts / 5 months.
     # NOTE: reindex/ffill + dropna silently shrinks the series to the range
     # covered by quarterly data; this check enforces the 70% floor explicitly.
-    final_span = _series_span_days(series)
-    min_final  = int(days * _PERIOD_COVERAGE_THRESHOLD)
+    final_span  = _series_span_days(series)
+    min_final   = int(days * _PERIOD_COVERAGE_THRESHOLD)
+    sdates      = [str(pd.Timestamp(d).date()) for d in series.index]
     if final_span < min_final:
-        raise ValueError(
+        err_debug = {
+            "selected_period": period,
+            "metric":          metric,
+            "requested_days":  days,
+            "actual_days":     final_span,
+            "point_count":     len(series),
+            "x_len":           len(series),
+            "x_min":           sdates[0],
+            "x_max":           sdates[-1],
+            "x_first5":        sdates[:5],
+            "x_last5":         sdates[-5:],
+            "source":          source,
+        }
+        raise InsufficientCoverageError(
             f"{METRIC_LABELS[metric]} for '{symbol}' covers only {final_span} "
             f"calendar days after TTM computation "
-            f"({pd.Timestamp(series.index[0]).date()} \u2192 "
-            f"{pd.Timestamp(series.index[-1]).date()}), "
+            f"({sdates[0]} \u2192 {sdates[-1]}), "
             f"but period '{period}' ({days} days) requires \u2265{min_final} days "
             f"({_PERIOD_COVERAGE_THRESHOLD:.0%} threshold). "
             f"Points: {len(series)}. Source: {source}. "
             "The quarterly financial history is too limited for this period. "
             "Set FMP_API_KEY for extended data (up to 44 quarters), or select a "
-            "shorter period."
+            "shorter period.",
+            debug=err_debug,
         )
 
     # ── API-level response log ────────────────────────────────────────────────

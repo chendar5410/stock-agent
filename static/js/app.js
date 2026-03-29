@@ -63,11 +63,13 @@ function fmt(v, d = 2) { return v == null ? "—" : Number(v).toFixed(d); }
 
 async function apiFetch(url) {
   const r = await fetch(url);
+  const body = await r.json().catch(() => ({}));
   if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new Error(body.detail || `HTTP ${r.status}`);
+    const err = new Error(body.detail || `HTTP ${r.status}`);
+    err.responseBody = body;   // preserve full body so callers can extract debug
+    throw err;
   }
-  return r.json();
+  return body;
 }
 
 // Hard contract checks — reject degenerate payloads before any Plotly call.
@@ -139,25 +141,31 @@ function _singleDiagHTML(dbg) {
   const l5 = (dbg.x_last5  || []).join(", ") || "—";
   return `
     <div class="drow">
-      <span class="dlabel">period:</span><span class="dval">${dbg.selected_period ?? "?"}</span>
+      <span class="dlabel">selected_period:</span><span class="dval">${dbg.selected_period ?? "?"}</span>
       &nbsp;|&nbsp;
-      <span class="dlabel">x_min:</span><span class="dval">${dbg.x_min ?? "?"}</span>
-      &nbsp;|&nbsp;
-      <span class="dlabel">x_max:</span><span class="dval">${dbg.x_max ?? "?"}</span>
-      &nbsp;|&nbsp;
-      <span class="dlabel">x_len:</span><span class="dval">${dbg.x_len ?? "?"}</span>
-      &nbsp;|&nbsp;
-      <span class="dlabel">actual_days:</span><span class="dval">${dbg.actual_days ?? "?"}</span>
-      &nbsp;/&nbsp;
-      <span class="dlabel">requested:</span><span class="dval">${dbg.requested_days ?? "?"}</span>
+      <span class="dlabel">metric:</span><span class="dval">${dbg.metric ?? "?"}</span>
       &nbsp;|&nbsp;
       <span class="dlabel">source:</span><span class="dval">${dbg.source ?? "?"}</span>
     </div>
     <div class="drow" style="margin-top:3px">
-      <span class="dlabel">first 5 x:</span>&nbsp;<span class="dcode">${f5}</span>
+      <span class="dlabel">requested_days:</span><span class="dval">${dbg.requested_days ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">actual_days:</span><span class="dval">${dbg.actual_days ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">point_count:</span><span class="dval">${dbg.point_count ?? dbg.x_len ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">x_len:</span><span class="dval">${dbg.x_len ?? "?"}</span>
+    </div>
+    <div class="drow" style="margin-top:3px">
+      <span class="dlabel">x_min:</span><span class="dval">${dbg.x_min ?? "?"}</span>
+      &nbsp;|&nbsp;
+      <span class="dlabel">x_max:</span><span class="dval">${dbg.x_max ?? "?"}</span>
+    </div>
+    <div class="drow" style="margin-top:3px">
+      <span class="dlabel">x_first5:</span>&nbsp;<span class="dcode">${f5}</span>
     </div>
     <div class="drow">
-      <span class="dlabel">last 5 x:&nbsp;</span><span class="dcode">${l5}</span>
+      <span class="dlabel">x_last5:&nbsp;</span><span class="dcode">${l5}</span>
     </div>`;
 }
 
@@ -248,13 +256,26 @@ singleForm.addEventListener("submit", async (e) => {
     // Debug line: period | start → end | pts | src
     const dbg = data.debug || {};
     singleDebug.textContent =
-      `${dbg.selected_period || data.period} | ${dbg.start_date || "?"} \u2192 ${dbg.end_date || "?"} | ${dbg.point_count ?? data.points} pts | src: ${data.source || "?"}`;
+      `${dbg.selected_period || data.period} | ${dbg.x_min || "?"} \u2192 ${dbg.x_max || "?"} | ${dbg.point_count ?? data.points} pts | src: ${dbg.source || data.source || "?"}`;
     singleDebug.style.display = "block";
+
+    // Full debug panel — always shown on successful fetch.
+    singleDiag.innerHTML = _singleDiagHTML(dbg);
+    singleDiag.style.display = "block";
 
     renderSingleChart(data);
   } catch (err) {
+    // Clear any stale chart from a previous request BEFORE showing the error.
     clearSingleChart();
     showStatus(singleStatus, "error", err.message);
+
+    // If the server returned a debug block (e.g. InsufficientCoverageError
+    // returns debug even in the 422 body), show it so the data is visible.
+    const errDebug = err.responseBody?.debug;
+    if (errDebug) {
+      singleDiag.innerHTML = _singleDiagHTML(errDebug);
+      singleDiag.style.display = "block";
+    }
   }
 });
 
@@ -274,13 +295,6 @@ function renderSingleChart(data) {
 
   // ── Step 3: create the chart from scratch ─────────────────────────────
   Plotly.newPlot(chartDiv, fig.data, fig.layout, PLOTLY_CFG);
-
-  // ── Step 4: populate the visible diagnostic panel ─────────────────────
-  // Shows x_len / x_min / x_max / first-5 / last-5 under the chart so
-  // you can verify the date range without opening DevTools.
-  const dbg = data.debug || {};
-  singleDiag.innerHTML = _singleDiagHTML(dbg);
-  singleDiag.style.display = "block";
 
   const z = data.zscore;
   const [label, cls] = zBadge(z);
