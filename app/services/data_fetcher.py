@@ -47,11 +47,13 @@ if not FMP_API_KEY:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-MetricKey = Literal["trailing_pe", "price_sales"]
+MetricKey = Literal["trailing_pe", "price_sales", "forward_pe", "forward_ps"]
 
 METRIC_LABELS: dict[str, str] = {
     "trailing_pe": "Trailing P/E",
     "price_sales": "Price/Sales",
+    "forward_pe":  "Forward P/E",
+    "forward_ps":  "Forward P/S",
 }
 
 PERIOD_DAYS: dict[str, int] = {
@@ -719,6 +721,90 @@ def _get_shares(symbol: str) -> tuple[float, str]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  NTM analyst estimates — used by forward_pe and forward_ps
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _fmp_ntm_estimates(symbol: str) -> dict:
+    """Fetch next-twelve-months EPS and revenue consensus from FMP analyst-estimates."""
+    records = _fmp_get(f"/analyst-estimates/{symbol}", {"period": "annual", "limit": 4})
+    if not isinstance(records, list) or not records:
+        raise FMPError(f"FMP returned no analyst estimates for '{symbol}'.")
+
+    today = datetime.now().date()
+    sorted_recs = sorted(records, key=lambda r: r.get("date", ""))
+    future = [r for r in sorted_recs if pd.to_datetime(r["date"]).date() > today]
+    rec = future[0] if future else sorted_recs[-1]
+
+    eps = rec.get("estimatedEpsAvg")
+    rev = rec.get("estimatedRevenueAvg")
+    if eps is None and rev is None:
+        raise FMPError(f"FMP analyst estimates for '{symbol}' contain no EPS or revenue.")
+
+    return {
+        "ntm_eps":     float(eps) if eps is not None else None,
+        "ntm_revenue": float(rev) if rev is not None else None,
+    }
+
+
+def _yf_ntm_estimates(symbol: str) -> dict:
+    """Fetch NTM EPS and revenue from yfinance (best-effort)."""
+    ticker      = yf.Ticker(symbol)
+    ntm_eps     = None
+    ntm_revenue = None
+
+    try:
+        info    = ticker.info
+        raw_eps = info.get("forwardEps")
+        if raw_eps is not None and float(raw_eps) != 0:
+            ntm_eps = float(raw_eps)
+    except Exception as exc:
+        logger.debug("yfinance forwardEps unavailable for %s: %s", symbol, exc)
+
+    try:
+        rev_est = ticker.get_revenue_estimate(freq="yearly")
+        if rev_est is not None and not rev_est.empty:
+            avg = rev_est.iloc[0].get("avg")
+            if avg is not None and float(avg) > 0:
+                ntm_revenue = float(avg)
+    except Exception:
+        pass
+
+    if ntm_revenue is None:
+        try:
+            info       = ticker.info
+            rev_growth = info.get("revenueGrowth")
+            ttm_rev    = info.get("totalRevenue")
+            if rev_growth is not None and ttm_rev is not None and float(ttm_rev) > 0:
+                ntm_revenue = float(ttm_rev) * (1.0 + float(rev_growth))
+        except Exception as exc:
+            logger.debug("yfinance revenue growth estimate unavailable for %s: %s", symbol, exc)
+
+    return {"ntm_eps": ntm_eps, "ntm_revenue": ntm_revenue}
+
+
+def _get_ntm_estimates(symbol: str) -> tuple[dict, str]:
+    """FMP first, yfinance fallback. Always returns a dict (fields may be None)."""
+    try:
+        est = _fmp_ntm_estimates(symbol)
+        if est.get("ntm_eps") is not None or est.get("ntm_revenue") is not None:
+            return est, "fmp"
+    except FMPError as exc:
+        logger.debug("FMP NTM estimates unavailable for %s: %s", symbol, exc)
+    except Exception as exc:
+        logger.debug("FMP NTM estimates error for %s: %s", symbol, exc)
+
+    try:
+        est = _yf_ntm_estimates(symbol)
+        if est.get("ntm_eps") is not None or est.get("ntm_revenue") is not None:
+            return est, "yfinance"
+    except Exception as exc:
+        logger.debug("yfinance NTM estimates error for %s: %s", symbol, exc)
+
+    logger.warning("No NTM estimates available for '%s'; forward metric will use TTM fallback.", symbol)
+    return {}, "none"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Metric series builders
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -797,6 +883,79 @@ def _price_sales_series(
     market_cap = price * shares
     ps = market_cap / rev_daily
     return ps.replace([np.inf, -np.inf], np.nan).dropna(), [inc_src, sh_src]
+
+
+def _forward_pe_series(
+    symbol: str, price: pd.Series
+) -> tuple[pd.Series, list[str]]:
+    """Build daily Forward P/E.
+
+    Historical forward P/E at date t = price(t) / EPS_TTM(t + 365 days).
+    This is the "realized forward" — what the next year's EPS turned out to be.
+    For the trailing ~1 year where t+365 exceeds available TTM data, the NTM
+    analyst consensus EPS is used.  If no estimate is available, the most recent
+    TTM EPS is forward-filled as a conservative fallback.
+    """
+    ttm, inc_src = _get_ttm_income(symbol)
+    ni_ttm = ttm.get("ni_ttm", pd.Series(dtype=float)).dropna().sort_index()
+    if ni_ttm.empty:
+        raise ValueError(
+            f"Net income TTM data is unavailable for '{symbol}'. "
+            "Cannot compute Forward P/E."
+        )
+
+    shares, sh_src = _get_shares(symbol)
+    eps_ttm = (ni_ttm / shares)
+    eps_ttm.index = _strip_tz(pd.to_datetime(eps_ttm.index))
+
+    estimates, est_src = _get_ntm_estimates(symbol)
+    ntm_eps = estimates.get("ntm_eps")
+
+    # Shift price dates forward by 1 year; reindex TTM EPS at those shifted dates.
+    fwd_dates = price.index + pd.Timedelta(days=365)
+    eps_fwd   = eps_ttm.reindex(fwd_dates, method="ffill")
+    eps_fwd.index = price.index
+
+    # Fill the NaN tail (recent ~1 year beyond TTM data) with analyst NTM EPS.
+    if ntm_eps and ntm_eps > 0:
+        eps_fwd = eps_fwd.fillna(ntm_eps)
+    else:
+        eps_fwd = eps_fwd.fillna(eps_ttm.reindex(price.index, method="ffill"))
+
+    pe = (price / eps_fwd).replace([np.inf, -np.inf], np.nan).dropna()
+    return pe, [inc_src, sh_src, est_src]
+
+
+def _forward_ps_series(
+    symbol: str, price: pd.Series
+) -> tuple[pd.Series, list[str]]:
+    """Build daily Forward P/S using 1-year-shifted TTM Revenue + NTM estimate."""
+    ttm, inc_src = _get_ttm_income(symbol)
+    rev_ttm = ttm.get("rev_ttm", pd.Series(dtype=float)).dropna().sort_index()
+    if rev_ttm.empty:
+        raise ValueError(
+            f"Revenue TTM data is unavailable for '{symbol}'. "
+            "Cannot compute Forward P/S."
+        )
+
+    shares, sh_src = _get_shares(symbol)
+    rev_ttm.index = _strip_tz(pd.to_datetime(rev_ttm.index))
+
+    estimates, est_src = _get_ntm_estimates(symbol)
+    ntm_revenue = estimates.get("ntm_revenue")
+
+    fwd_dates = price.index + pd.Timedelta(days=365)
+    rev_fwd   = rev_ttm.reindex(fwd_dates, method="ffill")
+    rev_fwd.index = price.index
+
+    if ntm_revenue and ntm_revenue > 0:
+        rev_fwd = rev_fwd.fillna(ntm_revenue)
+    else:
+        rev_fwd = rev_fwd.fillna(rev_ttm.reindex(price.index, method="ffill"))
+
+    market_cap = price * shares
+    ps = (market_cap / rev_fwd).replace([np.inf, -np.inf], np.nan).dropna()
+    return ps, [inc_src, sh_src, est_src]
 
 
 # ── Result builder ────────────────────────────────────────────────────────────
@@ -910,6 +1069,10 @@ def fetch_valuation_series(
             series, fund_sources = _trailing_pe_series(symbol, price)
         elif metric == "price_sales":
             series, fund_sources = _price_sales_series(symbol, price)
+        elif metric == "forward_pe":
+            series, fund_sources = _forward_pe_series(symbol, price)
+        elif metric == "forward_ps":
+            series, fund_sources = _forward_ps_series(symbol, price)
         else:
             raise ValueError(f"Unsupported metric: '{metric}'.")
     except ValueError:
