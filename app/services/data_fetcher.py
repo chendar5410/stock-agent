@@ -885,16 +885,30 @@ def _price_sales_series(
     return ps.replace([np.inf, -np.inf], np.nan).dropna(), [inc_src, sh_src]
 
 
+def _ntm_growth_factor(ttm: pd.Series) -> float:
+    """Estimate 1-year forward growth factor from historical YoY TTM growth.
+
+    Uses pct_change(4) for quarterly-frequency TTM series (4 pts/yr),
+    falling back to pct_change(1) when the series is too short.
+    Returns 1.0 if no valid growth can be computed.
+    """
+    yoy = ttm.pct_change(4).dropna()
+    if yoy.empty:
+        yoy = ttm.pct_change(1).dropna()
+    if yoy.empty:
+        return 1.0
+    return float(1.0 + yoy.mean())
+
+
 def _forward_pe_series(
     symbol: str, price: pd.Series
 ) -> tuple[pd.Series, list[str]]:
     """Build daily Forward P/E.
 
-    Historical forward P/E at date t = price(t) / EPS_TTM(t + 365 days).
-    This is the "realized forward" — what the next year's EPS turned out to be.
-    For the trailing ~1 year where t+365 exceeds available TTM data, the NTM
-    analyst consensus EPS is used.  If no estimate is available, the most recent
-    TTM EPS is forward-filled as a conservative fallback.
+    forward_eps(t) = eps_ttm(t) * g
+    where g = ntm_eps / current_ttm_eps   (analyst estimate available)
+           or 1 + mean(eps_ttm.pct_change(4))  (no estimate).
+    Series is then reindexed to price.index via ffill.
     """
     ttm, inc_src = _get_ttm_income(symbol)
     ni_ttm = ttm.get("ni_ttm", pd.Series(dtype=float)).dropna().sort_index()
@@ -909,27 +923,31 @@ def _forward_pe_series(
     eps_ttm.index = _strip_tz(pd.to_datetime(eps_ttm.index))
 
     estimates, est_src = _get_ntm_estimates(symbol)
-    ntm_eps = estimates.get("ntm_eps")
+    ntm_eps     = estimates.get("ntm_eps")
+    current_eps = float(eps_ttm.iloc[-1])
 
-    # Shift price dates forward by 1 year; reindex TTM EPS at those shifted dates.
-    fwd_dates = price.index + pd.Timedelta(days=365)
-    eps_fwd   = eps_ttm.reindex(fwd_dates, method="ffill")
-    eps_fwd.index = price.index
-
-    # Fill the NaN tail (recent ~1 year beyond TTM data) with analyst NTM EPS.
-    if ntm_eps and ntm_eps > 0:
-        eps_fwd = eps_fwd.fillna(ntm_eps)
+    if ntm_eps and ntm_eps > 0 and current_eps > 0:
+        g = ntm_eps / current_eps
     else:
-        eps_fwd = eps_fwd.fillna(eps_ttm.reindex(price.index, method="ffill"))
+        g = _ntm_growth_factor(eps_ttm)
+        est_src = "ttm_growth"
 
-    pe = (price / eps_fwd).replace([np.inf, -np.inf], np.nan).dropna()
+    forward_eps = eps_ttm * g
+    forward_eps_daily = forward_eps.reindex(price.index, method="ffill")
+
+    pe = (price / forward_eps_daily).replace([np.inf, -np.inf], np.nan).dropna()
     return pe, [inc_src, sh_src, est_src]
 
 
 def _forward_ps_series(
     symbol: str, price: pd.Series
 ) -> tuple[pd.Series, list[str]]:
-    """Build daily Forward P/S using 1-year-shifted TTM Revenue + NTM estimate."""
+    """Build daily Forward P/S.
+
+    forward_rev(t) = rev_ttm(t) * g
+    where g = ntm_revenue / current_rev_ttm  (analyst estimate available)
+           or 1 + mean(rev_ttm.pct_change(4))  (no estimate).
+    """
     ttm, inc_src = _get_ttm_income(symbol)
     rev_ttm = ttm.get("rev_ttm", pd.Series(dtype=float)).dropna().sort_index()
     if rev_ttm.empty:
@@ -943,18 +961,19 @@ def _forward_ps_series(
 
     estimates, est_src = _get_ntm_estimates(symbol)
     ntm_revenue = estimates.get("ntm_revenue")
+    current_rev = float(rev_ttm.iloc[-1])
 
-    fwd_dates = price.index + pd.Timedelta(days=365)
-    rev_fwd   = rev_ttm.reindex(fwd_dates, method="ffill")
-    rev_fwd.index = price.index
-
-    if ntm_revenue and ntm_revenue > 0:
-        rev_fwd = rev_fwd.fillna(ntm_revenue)
+    if ntm_revenue and ntm_revenue > 0 and current_rev > 0:
+        g = ntm_revenue / current_rev
     else:
-        rev_fwd = rev_fwd.fillna(rev_ttm.reindex(price.index, method="ffill"))
+        g = _ntm_growth_factor(rev_ttm)
+        est_src = "ttm_growth"
+
+    forward_rev = rev_ttm * g
+    forward_rev_daily = forward_rev.reindex(price.index, method="ffill")
 
     market_cap = price * shares
-    ps = (market_cap / rev_fwd).replace([np.inf, -np.inf], np.nan).dropna()
+    ps = (market_cap / forward_rev_daily).replace([np.inf, -np.inf], np.nan).dropna()
     return ps, [inc_src, sh_src, est_src]
 
 
