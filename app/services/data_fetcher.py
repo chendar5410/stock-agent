@@ -383,12 +383,32 @@ def _yf_price_history(symbol: str, days: int) -> pd.Series:
     return s
 
 
-_NI_COLS  = [
+_NI_COLS = [
+    # Title Case with spaces (yfinance pretty=True)
     "Net Income",
     "Net Income Common Stockholders",
     "Net Income From Continuing Operations",
+    "Net Income Including Noncontrolling Interests",
+    "Net Income Continuous Operations",
+    "Normalized Income",
+    # CamelCase (yfinance pretty=False or raw)
+    "NetIncome",
+    "NetIncomeCommonStockholders",
+    "NetIncomeFromContinuingOperations",
+    "NetIncomeIncludingNoncontrollingInterests",
+    "NetIncomeContinuousOperations",
+    "NormalizedIncome",
 ]
-_REV_COLS = ["Total Revenue", "Revenue", "Net Revenue"]
+_REV_COLS = [
+    # Title Case
+    "Total Revenue",
+    "Revenue",
+    "Net Revenue",
+    "Operating Revenue",
+    # CamelCase
+    "TotalRevenue",
+    "OperatingRevenue",
+]
 
 
 def _yf_extract_ni_rev(fin: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
@@ -429,64 +449,77 @@ def _yf_ttm_income(symbol: str) -> tuple[dict, str]:
     # ── 1. Quarterly rolling TTM ─────────────────────────────────────────────
     q_ni_ttm  = pd.Series(dtype=float)
     q_rev_ttm = pd.Series(dtype=float)
+
+    def _try_quarterly(fin: pd.DataFrame, label: str) -> None:
+        nonlocal q_ni_ttm, q_rev_ttm
+        if fin is None or (hasattr(fin, "empty") and fin.empty):
+            return
+        fin.columns = _strip_tz(pd.to_datetime(fin.columns))
+        ni, rev = _yf_extract_ni_rev(fin)
+        print(f"[TRACE] _yf_ttm_income({symbol}) quarterly {label}")
+        print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
+        if not ni.empty:
+            print(f"  ni dates: {list(ni.index)}")
+        if len(ni) > 0:
+            ttm = ni.rolling(4, min_periods=4).sum().dropna()
+            print(f"  ni_ttm after rolling(4): rows={len(ttm)}  dates={list(ttm.index)}")
+            if len(ttm) > len(q_ni_ttm):
+                q_ni_ttm = ttm
+        if len(rev) > 0:
+            ttm = rev.rolling(4, min_periods=4).sum().dropna()
+            if len(ttm) > len(q_rev_ttm):
+                q_rev_ttm = ttm
+
     for attr in ("quarterly_income_stmt", "quarterly_financials"):
         try:
-            fin = getattr(ticker, attr, None)
-            if fin is None or (hasattr(fin, "empty") and fin.empty):
-                print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr}: empty/None")
-                continue
-            fin.columns = _strip_tz(pd.to_datetime(fin.columns))
-            ni, rev = _yf_extract_ni_rev(fin)
-            # ── TRACE ─────────────────────────────────────────────────────────
-            print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr}")
-            print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
-            if not ni.empty:
-                print(f"  ni dates: {list(ni.index)}")
-            # ──────────────────────────────────────────────────────────────────
-            if len(ni) > 0:
-                ttm = ni.rolling(4, min_periods=4).sum().dropna()
-                print(f"  ni_ttm after rolling(4): rows={len(ttm)}  dates={list(ttm.index)}")
-                if len(ttm) > len(q_ni_ttm):
-                    q_ni_ttm = ttm
-                    logger.debug(
-                        "yfinance %s: %d quarterly TTM ni points for %s",
-                        attr, len(ttm), symbol,
-                    )
-            if len(rev) > 0:
-                ttm = rev.rolling(4, min_periods=4).sum().dropna()
-                if len(ttm) > len(q_rev_ttm):
-                    q_rev_ttm = ttm
+            _try_quarterly(getattr(ticker, attr, None), f"attr={attr}")
         except Exception as exc:
             print(f"[TRACE] _yf_ttm_income({symbol}) quarterly attr={attr} EXCEPTION: {exc}")
             logger.debug("yfinance %s unavailable for %s: %s", attr, symbol, exc)
 
+    # Fallback: pretty=False (returns CamelCase row names)
+    if q_ni_ttm.empty:
+        for freq in ("quarterly",):
+            try:
+                fin = ticker.get_income_stmt(pretty=False, freq=freq)
+                _try_quarterly(fin, f"pretty=False freq={freq}")
+            except Exception as exc:
+                logger.debug("yfinance get_income_stmt(pretty=False, freq=%s) failed for %s: %s", freq, symbol, exc)
+
     # ── 2. Annual TTM (fiscal-year total = TTM at fiscal-year-end) ───────────
     a_ni  = pd.Series(dtype=float)
     a_rev = pd.Series(dtype=float)
+
+    def _try_annual(fin: pd.DataFrame, label: str) -> None:
+        nonlocal a_ni, a_rev
+        if fin is None or (hasattr(fin, "empty") and fin.empty):
+            return
+        fin.columns = _strip_tz(pd.to_datetime(fin.columns))
+        ni, rev = _yf_extract_ni_rev(fin)
+        print(f"[TRACE] _yf_ttm_income({symbol}) annual {label}")
+        print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
+        if not ni.empty:
+            print(f"  ni dates: {list(ni.index)}")
+        if len(ni) > len(a_ni):
+            a_ni = ni
+        if len(rev) > len(a_rev):
+            a_rev = rev
+
     for attr in ("income_stmt", "financials"):
         try:
-            fin = getattr(ticker, attr, None)
-            if fin is None or (hasattr(fin, "empty") and fin.empty):
-                print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr}: empty/None")
-                continue
-            fin.columns = _strip_tz(pd.to_datetime(fin.columns))
-            ni, rev = _yf_extract_ni_rev(fin)
-            # ── TRACE ─────────────────────────────────────────────────────────
-            print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr}")
-            print(f"  raw ni rows={len(ni)}  raw rev rows={len(rev)}")
-            if not ni.empty:
-                print(f"  ni dates: {list(ni.index)}")
-            # ──────────────────────────────────────────────────────────────────
-            if len(ni) > len(a_ni):
-                a_ni = ni
-                logger.debug(
-                    "yfinance %s: %d annual ni points for %s", attr, len(ni), symbol
-                )
-            if len(rev) > len(a_rev):
-                a_rev = rev
+            _try_annual(getattr(ticker, attr, None), f"attr={attr}")
         except Exception as exc:
             print(f"[TRACE] _yf_ttm_income({symbol}) annual attr={attr} EXCEPTION: {exc}")
             logger.debug("yfinance %s unavailable for %s: %s", attr, symbol, exc)
+
+    # Fallback: pretty=False (returns CamelCase row names)
+    if a_ni.empty:
+        for freq in ("yearly",):
+            try:
+                fin = ticker.get_income_stmt(pretty=False, freq=freq)
+                _try_annual(fin, f"pretty=False freq={freq}")
+            except Exception as exc:
+                logger.debug("yfinance get_income_stmt(pretty=False, freq=%s) failed for %s: %s", freq, symbol, exc)
 
     # ── 3. Merge: annual provides historical base, quarterly TTM is recent ───
     def _merge(q_ttm: pd.Series, a_vals: pd.Series) -> pd.Series:
@@ -719,31 +752,6 @@ def _trailing_pe_series(
     print(f"  eps_ttm last5={list(eps_ttm.index[-5:])}")
     # ───────────────────────────────────────────────────────────────────────────
 
-    # FAIL EARLY: reindex+ffill produces NaN for every price date before
-    # eps_ttm.index.min().  dropna() then silently removes those dates,
-    # leaving a series that only covers the tail of the requested period.
-    # Check now so we raise a clear error instead of returning a short chart.
-    price_span  = _series_span_days(price)
-    min_needed  = int(price_span * _PERIOD_COVERAGE_THRESHOLD)
-    eps_first   = pd.Timestamp(eps_ttm.index.min())
-    price_last  = pd.Timestamp(price.index.max())
-    ttm_cover   = (price_last - eps_first).days
-    print(f"[TRACE] _trailing_pe_series({symbol}) TTM COVERAGE CHECK")
-    print(f"  price_span={price_span} days  min_needed={min_needed} days")
-    print(f"  eps_first={eps_first.date()}  ttm_cover={ttm_cover} days")
-    print(f"  verdict={'PASS' if ttm_cover >= min_needed else 'FAIL'}")
-    if ttm_cover < min_needed:
-        raise ValueError(
-            f"EPS TTM coverage insufficient for '{symbol}': "
-            f"earliest TTM point is {eps_first.date()} "
-            f"({ttm_cover} days before end of price window), "
-            f"but {min_needed} days are required. "
-            f"eps_ttm has {len(eps_ttm)} point(s): "
-            f"{eps_ttm.index.min().date()} \u2192 {eps_ttm.index.max().date()}. "
-            "Set FMP_API_KEY for extended financial history (up to 44 quarters), "
-            "or select a shorter period."
-        )
-
     eps_daily = eps_ttm.reindex(price.index, method="ffill")
 
     # ── TRACE ──────────────────────────────────────────────────────────────────
@@ -784,28 +792,6 @@ def _price_sales_series(
     shares, sh_src = _get_shares(symbol)
 
     rev_ttm.index = _strip_tz(pd.to_datetime(rev_ttm.index))
-
-    # FAIL EARLY: same coverage guard as _trailing_pe_series.
-    price_span = _series_span_days(price)
-    min_needed = int(price_span * _PERIOD_COVERAGE_THRESHOLD)
-    rev_first  = pd.Timestamp(rev_ttm.index.min())
-    price_last = pd.Timestamp(price.index.max())
-    ttm_cover  = (price_last - rev_first).days
-    print(f"[TRACE] _price_sales_series({symbol}) REV TTM COVERAGE CHECK")
-    print(f"  price_span={price_span} days  min_needed={min_needed} days")
-    print(f"  rev_first={rev_first.date()}  ttm_cover={ttm_cover} days")
-    print(f"  verdict={'PASS' if ttm_cover >= min_needed else 'FAIL'}")
-    if ttm_cover < min_needed:
-        raise ValueError(
-            f"Revenue TTM coverage insufficient for '{symbol}': "
-            f"earliest TTM point is {rev_first.date()} "
-            f"({ttm_cover} days before end of price window), "
-            f"but {min_needed} days are required. "
-            f"rev_ttm has {len(rev_ttm)} point(s): "
-            f"{rev_ttm.index.min().date()} \u2192 {rev_ttm.index.max().date()}. "
-            "Set FMP_API_KEY for extended financial history (up to 44 quarters), "
-            "or select a shorter period."
-        )
 
     rev_daily = rev_ttm.reindex(price.index, method="ffill")
     market_cap = price * shares
