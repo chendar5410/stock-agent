@@ -1,0 +1,115 @@
+/* Portfolio dashboard styles — RTL-friendly, piggy-backs on style.css vars. */
+
+.portfolio-body { padding: 16px 24px 40px; }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.pf-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.pf-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pf-title h1 { font-size: 20px; font-weight: 600; }
+.back-link { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+.back-link:hover { color: var(--accent); }
+.pill {
+  display: inline-block; padding: 2px 10px; border-radius: 999px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 12px; font-weight: 500;
+}
+.pill.green  { background: rgba(63,185,80,0.12);  color: var(--green);  border-color: var(--green); }
+.pill.red    { background: rgba(247,129,102,0.12); color: var(--red);    border-color: var(--red); }
+.pill.yellow { background: rgba(227,179,65,0.12);  color: var(--yellow); border-color: var(--yellow); }
+
+.pf-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+  padding: 6px 14px; border-radius: var(--radius); cursor: pointer; font-size: 13px;
+  transition: background 0.1s, border-color 0.1s;
+}
+.btn:hover { background: #2d333b; border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.muted { color: var(--text-muted); font-size: 12px; }
+
+/* ── KPI row ────────────────────────────────────────────────────────── */
+.kpi-row {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;
+}
+.kpi-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.kpi-card.agent { border-right: 3px solid var(--accent); }
+.kpi-card.user  { border-right: 3px solid var(--purple); }
+.kpi-card.macro { border-right: 3px solid var(--yellow); }
+.kpi-label { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+.kpi-value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+.kpi-sub   { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+.kpi-grid {
+  display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr; gap: 4px 10px;
+  margin-top: 6px; font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.kpi-grid span { color: var(--text-muted); }
+.kpi-grid b    { color: var(--text); font-weight: 600; }
+
+.positive { color: var(--green); }
+.negative { color: var(--red); }
+.neutral  { color: var(--text-muted); }
+
+/* ── Panels ─────────────────────────────────────────────────────────── */
+.panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px;
+}
+.panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+.panel h2 .muted { font-size: 12px; font-weight: 400; }
+
+.two-col {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+@media (max-width: 960px) {
+  .kpi-row, .two-col { grid-template-columns: 1fr; }
+}
+
+.chart-tall { height: 360px; }
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.data-table th, .data-table td {
+  padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--border);
+}
+.data-table th:first-child, .data-table td:first-child { text-align: left; }
+.data-table th {
+  color: var(--text-muted); font-weight: 500; text-transform: uppercase;
+  font-size: 11px; letter-spacing: 0.05em;
+}
+.data-table tbody tr:hover { background: var(--surface2); }
+.thesis-cell { max-width: 320px; text-align: left; color: var(--text-muted); font-size: 12px; }
+
+/* ── Manual trade form ──────────────────────────────────────────────── */
+.manual-form {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; align-items: end;
+}
+.manual-form label {
+  display: flex; flex-direction: column; font-size: 12px;
+  color: var(--text-muted); gap: 4px;
+}
+.manual-form label.wide { grid-column: span 2; }
+.manual-form input, .manual-form select {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+  padding: 6px 10px; border-radius: 6px; font-size: 13px;
+}
+.manual-form input:focus, .manual-form select:focus {
+  outline: none; border-color: var(--accent);
+}
+.manual-form button { grid-column: span 1; }
+
+/* ── Summaries ──────────────────────────────────────────────────────── */
+#summaries-list { max-height: 480px; overflow-y: auto; }
+.summary-card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 12px; margin-bottom: 10px;
+}
+.summary-card h3 { font-size: 13px; margin-bottom: 6px; }
+.summary-card .meta { color: var(--text-muted); font-size: 11px; margin-bottom: 6px; }
+.summary-card .md   { white-space: pre-wrap; line-height: 1.6; font-size: 13px; }

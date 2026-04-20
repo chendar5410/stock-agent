@@ -3,3 +3,6 @@ __pycache__/
 *.pyo
 .env
 watchlist.json
+data/
+*.db
+*.sqlite

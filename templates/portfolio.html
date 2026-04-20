@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>Portfolio Agent — Live</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/portfolio.css">
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+</head>
+<body class="portfolio-body">
+
+<header class="pf-header">
+  <div class="pf-title">
+    <a href="/" class="back-link">← Valuation</a>
+    <h1>Portfolio Agent</h1>
+    <span id="broker-pill" class="pill">—</span>
+    <span id="market-pill" class="pill">—</span>
+    <span id="regime-pill" class="pill">—</span>
+  </div>
+  <div class="pf-controls">
+    <button id="btn-tick"   class="btn">Run tick</button>
+    <button id="btn-picker" class="btn">Run picker</button>
+    <button id="btn-summary" class="btn">Generate summary</button>
+    <span id="last-refresh" class="muted"></span>
+  </div>
+</header>
+
+<!-- KPI row -->
+<section class="kpi-row">
+  <div class="kpi-card agent">
+    <div class="kpi-label">Agent — equity</div>
+    <div class="kpi-value" id="agent-equity">$—</div>
+    <div class="kpi-sub">
+      <span id="agent-return" class="neutral">—</span> ·
+      cash <span id="agent-cash">—</span>
+    </div>
+  </div>
+  <div class="kpi-card user">
+    <div class="kpi-label">You — equity</div>
+    <div class="kpi-value" id="user-equity">$—</div>
+    <div class="kpi-sub">
+      <span id="user-return" class="neutral">—</span> ·
+      cash <span id="user-cash">—</span>
+    </div>
+  </div>
+  <div class="kpi-card macro">
+    <div class="kpi-label">Macro</div>
+    <div class="kpi-grid">
+      <span>VIX</span><b id="m-vix">—</b>
+      <span>DXY</span><b id="m-dxy">—</b>
+      <span>TLT</span><b id="m-tlt">—</b>
+      <span>Oil</span><b id="m-oil">—</b>
+      <span>P/C</span><b id="m-pc">—</b>
+    </div>
+  </div>
+</section>
+
+<!-- Equity curve -->
+<section class="panel">
+  <h2>Equity curves <span class="muted">(agent vs you)</span></h2>
+  <div id="equity-chart" class="chart-tall"></div>
+</section>
+
+<!-- Positions + picks -->
+<section class="two-col">
+  <div class="panel">
+    <h2>Positions — agent</h2>
+    <table class="data-table" id="agent-positions">
+      <thead><tr>
+        <th>Symbol</th><th>Qty</th><th>Entry</th><th>Last</th>
+        <th>Value</th><th>P&L</th><th>Stop</th><th>TP</th>
+      </tr></thead>
+      <tbody><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>This week's picks</h2>
+    <table class="data-table" id="picks-table">
+      <thead><tr>
+        <th>#</th><th>Symbol</th><th>Metric</th><th>Score</th><th>Thesis</th>
+      </tr></thead>
+      <tbody><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- User positions + manual trade -->
+<section class="two-col">
+  <div class="panel">
+    <h2>Positions — you</h2>
+    <table class="data-table" id="user-positions">
+      <thead><tr>
+        <th>Symbol</th><th>Qty</th><th>Entry</th><th>Last</th>
+        <th>Value</th><th>P&L</th>
+      </tr></thead>
+      <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Log a trade (your portfolio)</h2>
+    <form id="manual-trade-form" class="manual-form">
+      <label>Side
+        <select name="side" required>
+          <option value="buy">Buy</option>
+          <option value="sell">Sell</option>
+        </select>
+      </label>
+      <label>Symbol
+        <input name="symbol" type="text" maxlength="10" placeholder="AAPL" required>
+      </label>
+      <label>Dollars (buy)
+        <input name="dollars" type="number" min="1" step="1" placeholder="5000">
+      </label>
+      <label>Quantity (sell, blank = all)
+        <input name="quantity" type="number" min="0" step="0.0001">
+      </label>
+      <label class="wide">Reason
+        <input name="reason" type="text" maxlength="200" placeholder="optional note">
+      </label>
+      <button type="submit" class="btn primary">Submit</button>
+      <span id="trade-feedback" class="muted"></span>
+    </form>
+  </div>
+</section>
+
+<!-- Trades + daily summaries -->
+<section class="two-col">
+  <div class="panel">
+    <h2>Recent trades — agent</h2>
+    <table class="data-table" id="agent-trades">
+      <thead><tr>
+        <th>Time</th><th>Side</th><th>Symbol</th><th>Qty</th><th>Price</th><th>Reason</th>
+      </tr></thead>
+      <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Daily summaries</h2>
+    <div id="summaries-list"><p class="muted">Loading…</p></div>
+  </div>
+</section>
+
+<script src="/static/js/portfolio.js"></script>
+</body>
+</html>
