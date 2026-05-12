@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Morning Brief — News Slide Deck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/css/news.css" />
+  <!-- reveal.js (CDN) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css" id="reveal-theme" />
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+</head>
+<body>
+<div class="app-wrapper">
+
+  <header>
+    <div class="logo">Morning Brief <span>/ Pre-Market News Slide Agent</span></div>
+    <nav>
+      <a href="/" class="nav-link">← Valuation Chart</a>
+      <button class="active" data-panel="panel-compose">Compose</button>
+      <button data-panel="panel-archive">Archive</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         PANEL: Compose new deck
+    ══════════════════════════════════════════════════════════════════ -->
+    <div id="panel-compose" class="panel active">
+
+      <form id="compose-form" class="controls" autocomplete="off">
+        <div class="ctrl-group">
+          <label for="deck-date">Date</label>
+          <input id="deck-date" type="date" />
+        </div>
+        <div class="ctrl-group" style="flex:1;min-width:280px">
+          <label for="raw-text">Paste your X / morning summary</label>
+          <textarea id="raw-text" rows="10"
+            placeholder="Paste the raw pre-market thread here. Tickers, percentages, macro prints, earnings — Claude will structure it for you."></textarea>
+        </div>
+        <div class="ctrl-group" style="justify-content:flex-end">
+          <label>&nbsp;</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <label class="inline-check">
+              <input type="checkbox" id="overwrite-toggle" /> Overwrite if exists
+            </label>
+            <button type="submit" id="generate-btn" class="btn">Generate Deck</button>
+          </div>
+        </div>
+      </form>
+
+      <div id="compose-status" class="status"></div>
+
+      <!-- slideshow render target -->
+      <div id="deck-shell" style="display:none">
+        <div class="deck-toolbar">
+          <span id="deck-meta" class="deck-meta"></span>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button id="present-btn" class="btn btn-ghost">⛶ Present</button>
+            <button id="reload-btn" class="btn btn-ghost">↻ Reload</button>
+            <button id="delete-btn" class="btn btn-ghost danger">🗑 Delete</button>
+          </div>
+        </div>
+        <div class="reveal" id="reveal-root">
+          <div class="slides" id="slides-root"></div>
+        </div>
+      </div>
+
+    </div><!-- /panel-compose -->
+
+
+    <!-- ══════════════════════════════════════════════════════════════
+         PANEL: Archive
+    ══════════════════════════════════════════════════════════════════ -->
+    <div id="panel-archive" class="panel">
+      <div id="archive-status" class="status"></div>
+      <div id="archive-list" class="archive-list"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="/static/js/news.js?v=1"></script>
+</body>
+</html>

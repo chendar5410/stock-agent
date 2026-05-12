@@ -99,6 +99,43 @@ Add / remove tickers from the persistent watchlist.
 
 ---
 
+## Morning Brief — Pre-Market News Slide Agent
+
+A second page at **http://localhost:8000/news** that turns the raw morning
+news summary you paste from X / Twitter into a structured, didactic slide
+deck powered by the Claude API.
+
+### What it gives you each day
+- **Cover** with TL;DR overview and a market-tone pill (risk-on / risk-off / mixed / cautious)
+- **★ Watchlist in Today's News** — tickers from your existing watchlist that show up in the morning's headlines, flagged at the top
+- **Key levels** — futures, yields, $DXY, oil, etc.
+- **Macro / Earnings / Movers / Sectors** — each item carries a one-line *Why it matters* explaining the market mechanism, so you're not just memorizing headlines
+- **What to Watch Today** — scheduled prints, earnings AMC, Fed speakers
+- **Glossary** — 4-8 plain-English definitions for the jargon in today's news
+
+Decks are persisted to `decks/YYYY-MM-DD.json` and browsable from the **Archive** tab.
+
+### Setup
+```bash
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY=sk-ant-...   # required for /news
+uvicorn app.main:app --reload --port 8000
+```
+
+Open **http://localhost:8000/news**, paste the morning thread into the textbox, hit **Generate Deck**, then **⛶ Present** to go fullscreen.
+
+The model defaults to `claude-sonnet-4-6`. Override with `NEWS_DECK_MODEL=claude-opus-4-7` if you want denser explanations.
+
+### API
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/news/generate` | Body: `{raw_text, date?, overwrite?}` — calls Claude, saves the deck, returns it |
+| `GET` | `/api/news/decks` | List all saved decks (newest first) |
+| `GET` | `/api/news/decks/{date}` | Load one deck |
+| `DELETE` | `/api/news/decks/{date}` | Delete one deck |
+
+---
+
 ## Connecting Real Financial APIs
 
 Replace the functions in `app/services/data_fetcher.py`:
