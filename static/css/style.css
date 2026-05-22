@@ -254,6 +254,68 @@ input[type="text"] { min-width: 140px; }
   color: var(--red);
   border: 1px solid rgba(247,129,102,.3);
 }
+.status.success {
+  display: block;
+  background: rgba(63,185,80,.12);
+  color: var(--green);
+  border: 1px solid rgba(63,185,80,.3);
+}
+
+/* ── equity deck panel ───────────────────────────────────────────────────── */
+.deck-intro {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 18px;
+}
+.deck-intro h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.deck-intro p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+input[type="file"] {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-family: var(--font);
+}
+.deck-result {
+  margin-top: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.deck-result-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 13px;
+}
+.deck-label {
+  width: 110px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: .05em;
+}
+.deck-val { color: var(--text); flex: 1; }
+.deck-val.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-muted); }
+.deck-val a.btn { padding: 6px 14px; font-size: 12px; }
 
 /* spinner */
 .spinner {

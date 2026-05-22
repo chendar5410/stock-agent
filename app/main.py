@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.routers import valuation, watchlist_router
+from app.routers import deck, valuation, watchlist_router
 
 app = FastAPI(title="Valuation Chart Tool", version="1.0.0")
 
@@ -15,6 +15,7 @@ templates = Jinja2Templates(directory="templates")
 
 app.include_router(valuation.router)
 app.include_router(watchlist_router.router)
+app.include_router(deck.router)
 
 
 @app.get("/", response_class=HTMLResponse)
