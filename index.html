@@ -1,0 +1,1470 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>EnglishQuest — לומדים אנגלית בכיף</title>
+<!-- React + Tailwind דרך CDN, ללא שלב build -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Heebo", Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+  .en { direction: ltr; unicode-bidi: isolate; font-family: "Avenir Next", "Segoe UI", Arial, sans-serif; }
+  @keyframes pop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+  .pop { animation: pop 0.35s ease-out; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  .shake { animation: shake 0.3s ease-in-out; }
+  @keyframes floatUp { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-60px); opacity: 0; } }
+  .float-up { animation: floatUp 1s ease-out forwards; }
+  @keyframes slideIn { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .slide-in { animation: slideIn 0.3s ease-out; }
+  .no-select { -webkit-user-select: none; user-select: none; }
+</style>
+</head>
+<body class="bg-slate-100">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ============================================================
+   מאגר תוכן מובנה — עובד מלא גם בלי מפתח API
+   ============================================================ */
+
+// אוצר מילים: מילה, תרגום, משפט לדוגמה, רמה 1-3
+const VOCAB = [
+  { id:"v1",  en:"house",          he:"בית",        sentence:"My house is near the park.", level:1 },
+  { id:"v2",  en:"water",          he:"מים",        sentence:"I drink water every morning.", level:1 },
+  { id:"v3",  en:"friend",         he:"חבר/ה",      sentence:"My best friend lives next door.", level:1 },
+  { id:"v4",  en:"school",         he:"בית ספר",    sentence:"Our school starts at eight.", level:1 },
+  { id:"v5",  en:"happy",          he:"שמח",        sentence:"She was happy to see us.", level:1 },
+  { id:"v6",  en:"family",         he:"משפחה",      sentence:"My family eats dinner together.", level:1 },
+  { id:"v7",  en:"morning",        he:"בוקר",       sentence:"I wake up early in the morning.", level:1 },
+  { id:"v8",  en:"food",           he:"אוכל",       sentence:"Italian food is my favorite.", level:1 },
+  { id:"v9",  en:"play",           he:"לשחק",       sentence:"We play basketball after school.", level:1 },
+  { id:"v10", en:"book",           he:"ספר",        sentence:"This book is really interesting.", level:1 },
+  { id:"v11", en:"weather",        he:"מזג אוויר",  sentence:"The weather is great today.", level:2 },
+  { id:"v12", en:"choose",         he:"לבחור",      sentence:"You can choose any color you like.", level:2 },
+  { id:"v13", en:"important",      he:"חשוב",       sentence:"Sleep is important for your health.", level:2 },
+  { id:"v14", en:"remember",       he:"לזכור",      sentence:"I remember my first day at school.", level:2 },
+  { id:"v15", en:"dangerous",      he:"מסוכן",      sentence:"Crossing here is dangerous.", level:2 },
+  { id:"v16", en:"expensive",      he:"יקר",        sentence:"That phone is too expensive.", level:2 },
+  { id:"v17", en:"borrow",         he:"לשאול (חפץ)", sentence:"Can I borrow your pen?", level:2 },
+  { id:"v18", en:"improve",        he:"להשתפר",     sentence:"Practice helps you improve fast.", level:2 },
+  { id:"v19", en:"decide",         he:"להחליט",     sentence:"We need to decide where to go.", level:2 },
+  { id:"v20", en:"healthy",        he:"בריא",       sentence:"Eating fruit keeps you healthy.", level:2 },
+  { id:"v21", en:"quiet",          he:"שקט",        sentence:"The library is a quiet place.", level:2 },
+  { id:"v22", en:"journey",        he:"מסע",        sentence:"The journey took five hours.", level:2 },
+  { id:"v23", en:"achievement",    he:"הישג",       sentence:"Winning the game was a big achievement.", level:3 },
+  { id:"v24", en:"curious",        he:"סקרן",       sentence:"Cats are curious animals.", level:3 },
+  { id:"v25", en:"environment",    he:"סביבה",      sentence:"We should protect the environment.", level:3 },
+  { id:"v26", en:"opportunity",    he:"הזדמנות",    sentence:"This is a great opportunity to learn.", level:3 },
+  { id:"v27", en:"responsibility", he:"אחריות",     sentence:"Taking care of a pet is a big responsibility.", level:3 },
+  { id:"v28", en:"encourage",      he:"לעודד",      sentence:"Good teachers encourage their students.", level:3 },
+  { id:"v29", en:"experience",     he:"ניסיון / חוויה", sentence:"The trip was an amazing experience.", level:3 },
+  { id:"v30", en:"knowledge",      he:"ידע",        sentence:"Reading gives you knowledge.", level:3 },
+  { id:"v31", en:"definitely",     he:"בהחלט",      sentence:"I will definitely come to your party.", level:3 },
+  { id:"v32", en:"available",      he:"זמין",       sentence:"The teacher is available after class.", level:3 },
+];
+
+// דקדוק: השלמה / בחירה מרובה, עם הסבר בעברית
+const GRAMMAR = [
+  { id:"g1",  q:"She ___ to school every day.", options:["go","goes","going"], answer:"goes", level:1, explain:"בהווה פשוט (Present Simple), אחרי he/she/it מוסיפים s לפועל." },
+  { id:"g2",  q:"Yesterday we ___ a movie.", options:["watch","watched","watches"], answer:"watched", level:1, explain:"המילה Yesterday מסמנת עבר — לכן Past Simple: watched." },
+  { id:"g3",  q:"Tomorrow it ___ be sunny.", options:["will","was","is"], answer:"will", level:1, explain:"Tomorrow = עתיד, ולכן משתמשים ב-will." },
+  { id:"g4",  q:"___ you help me, please?", options:["Can","Does","Is"], answer:"Can", level:1, explain:"בקשה מנומסת מתחילה ב-Can (או Could)." },
+  { id:"g5",  q:"The book is ___ the table.", options:["on","in","at"], answer:"on", level:1, explain:"on = על. הספר נמצא על השולחן." },
+  { id:"g6",  q:"They ___ football right now.", options:["play","are playing","plays"], answer:"are playing", level:2, explain:"right now = ברגע זה, ולכן Present Progressive: are playing." },
+  { id:"g7",  q:"There ___ many people at the party.", options:["was","were","is"], answer:"were", level:2, explain:"people = רבים, ובעבר משתמשים ב-were." },
+  { id:"g8",  q:"She is taller ___ me.", options:["then","than","that"], answer:"than", level:2, explain:"בהשוואה משתמשים ב-than (לא להתבלבל עם then = אז)." },
+  { id:"g9",  q:"Do you like ___ in the sea?", options:["swim","swimming","swam"], answer:"swimming", level:2, explain:"אחרי like אפשר שם פועל ב-ing: like swimming." },
+  { id:"g10", q:"He ___ his keys, so he can't open the door.", options:["lost","loses","is losing"], answer:"lost", level:2, explain:"האירוע קרה בעבר והתוצאה עכשיו — כאן מספיק Past Simple: lost." },
+  { id:"g11", q:"I ___ my homework yet.", options:["didn't finish","haven't finished","don't finish"], answer:"haven't finished", level:3, explain:"המילה yet מתחברת ל-Present Perfect: haven't finished." },
+  { id:"g12", q:"He ___ in London since 2020.", options:["lives","has lived","is living"], answer:"has lived", level:3, explain:"since + נקודת זמן = Present Perfect: has lived." },
+  { id:"g13", q:"We ___ TV when Mom came home.", options:["watched","were watching","watch"], answer:"were watching", level:3, explain:"פעולה ארוכה שנקטעה על ידי פעולה קצרה — Past Progressive: were watching." },
+  { id:"g14", q:"I have never ___ sushi.", options:["ate","eaten","eat"], answer:"eaten", level:3, explain:"אחרי have/has בא הפועל בצורת V3: eaten." },
+  { id:"g15", q:"If it rains tomorrow, we ___ stay home.", options:["will","would","did"], answer:"will", level:3, explain:"משפט תנאי ראשון: If + הווה, ובחלק השני will." },
+];
+
+// הבנת הנקרא: קטע + שאלות
+const READING = [
+  {
+    id:"r1", level:1,
+    text:"Dan has a small dog named Rex. Every morning, Dan and Rex walk in the park. Rex loves to run and play with a ball. After the walk, Dan gives Rex food and water.",
+    questions:[
+      { q:"What is the dog's name?", options:["Dan","Rex","Ball"], answer:"Rex" },
+      { q:"What does Rex love to do?", options:["Sleep all day","Run and play","Eat in the park"], answer:"Run and play" },
+    ]
+  },
+  {
+    id:"r2", level:2,
+    text:"Maya wanted to buy a birthday present for her brother. She walked to the mall and looked in many stores. Everything was too expensive. Finally, she found a cool blue T-shirt on sale. Her brother loved it!",
+    questions:[
+      { q:"Why did Maya go to the mall?", options:["To buy a present","To meet her brother","To buy a T-shirt for herself"], answer:"To buy a present" },
+      { q:"Why didn't she buy something at first?", options:["The stores were closed","Everything was too expensive","She forgot her money"], answer:"Everything was too expensive" },
+    ]
+  },
+  {
+    id:"r3", level:3,
+    text:"Scientists say that teenagers need about nine hours of sleep every night, but most of them sleep much less. Phones and computers are one reason: the light from screens makes it harder for the brain to feel tired. Experts suggest turning off screens an hour before bed.",
+    questions:[
+      { q:"How much sleep do teenagers need?", options:["About six hours","About nine hours","About twelve hours"], answer:"About nine hours" },
+      { q:"What do experts suggest?", options:["Sleeping with the phone","Turning off screens before bed","Drinking coffee at night"], answer:"Turning off screens before bed" },
+    ]
+  },
+  {
+    id:"r4", level:3,
+    text:"Last summer, Noa volunteered at an animal shelter. At first, she was nervous because she had never worked with animals before. But after a few days, she learned how to feed the cats and walk the dogs. By the end of the summer, she decided she wants to become a vet.",
+    questions:[
+      { q:"How did Noa feel at first?", options:["Nervous","Bored","Angry"], answer:"Nervous" },
+      { q:"What does Noa want to become?", options:["A teacher","A vet","A dog trainer"], answer:"A vet" },
+    ]
+  },
+];
+
+// בניית משפט: מילים מעורבבות + תרגום עזר
+const SENTENCES = [
+  { id:"s1",  answer:"I like pizza", he:"אני אוהב פיצה", level:1 },
+  { id:"s2",  answer:"The dog is big", he:"הכלב גדול", level:1 },
+  { id:"s3",  answer:"She has a cat", he:"יש לה חתול", level:1 },
+  { id:"s4",  answer:"We are good friends", he:"אנחנו חברים טובים", level:1 },
+  { id:"s5",  answer:"He plays soccer every day", he:"הוא משחק כדורגל כל יום", level:2 },
+  { id:"s6",  answer:"We went to the beach yesterday", he:"הלכנו לים אתמול", level:2 },
+  { id:"s7",  answer:"Can I have some water please", he:"אפשר קצת מים בבקשה?", level:2 },
+  { id:"s8",  answer:"He does not like cold weather", he:"הוא לא אוהב מזג אוויר קר", level:2 },
+  { id:"s9",  answer:"I have been learning English for three years", he:"אני לומד אנגלית כבר שלוש שנים", level:3 },
+  { id:"s10", answer:"If I had time I would help you", he:"אם היה לי זמן הייתי עוזר לך", level:3 },
+  { id:"s11", answer:"She asked me where the library was", he:"היא שאלה אותי איפה הספרייה", level:3 },
+  { id:"s12", answer:"You should drink more water in the summer", he:"כדאי לך לשתות יותר מים בקיץ", level:3 },
+];
+
+// איות: השלמת אות חסרה או זיהוי כתיב נכון
+const SPELLING = [
+  { id:"p1",  type:"missing", display:"beca_se",   options:["u","o","a"], answer:"u", full:"because", he:"בגלל ש...", level:1 },
+  { id:"p2",  type:"missing", display:"scho_l",    options:["o","u","a"], answer:"o", full:"school", he:"בית ספר", level:1 },
+  { id:"p3",  type:"missing", display:"wh_ch",     options:["i","e","a"], answer:"i", full:"which", he:"איזה", level:1 },
+  { id:"p4",  type:"choose",  options:["frend","friend","freind"], answer:"friend", he:"חבר", level:1 },
+  { id:"p5",  type:"choose",  options:["wite","write","wright"], answer:"write", he:"לכתוב", level:1 },
+  { id:"p6",  type:"missing", display:"tomor_ow",  options:["r","w","o"], answer:"r", full:"tomorrow", he:"מחר", level:2 },
+  { id:"p7",  type:"missing", display:"diff_rent", options:["e","a","i"], answer:"e", full:"different", he:"שונה", level:2 },
+  { id:"p8",  type:"choose",  options:["peaple","people","peopel"], answer:"people", he:"אנשים", level:2 },
+  { id:"p9",  type:"choose",  options:["beleive","believe","belive"], answer:"believe", he:"להאמין", level:2 },
+  { id:"p10", type:"missing", display:"beaut_ful", options:["i","e","y"], answer:"i", full:"beautiful", he:"יפה", level:2 },
+  { id:"p11", type:"choose",  options:["Febuary","February","Februery"], answer:"February", he:"פברואר", level:3 },
+  { id:"p12", type:"choose",  options:["restorant","restaurant","resteraunt"], answer:"restaurant", he:"מסעדה", level:3 },
+  { id:"p13", type:"missing", display:"necess_ry", options:["a","e","i"], answer:"a", full:"necessary", he:"הכרחי", level:3 },
+  { id:"p14", type:"choose",  options:["definately","definitely","definitly"], answer:"definitely", he:"בהחלט", level:3 },
+];
+
+const DOMAINS = {
+  vocab:    { name:"אוצר מילים",  icon:"📚", color:"bg-sky-500" },
+  grammar:  { name:"דקדוק וזמנים", icon:"🧩", color:"bg-violet-500" },
+  reading:  { name:"הבנת הנקרא",  icon:"📖", color:"bg-emerald-500" },
+  sentence: { name:"בניית משפט",  icon:"🔤", color:"bg-amber-500" },
+  spelling: { name:"איות",        icon:"✏️", color:"bg-rose-500" },
+};
+
+/* ============================================================
+   שמירת מצב — localStorage
+   ============================================================ */
+
+const STORAGE_KEY = "englishQuest_v1";
+
+const DEFAULT_PROFILE = {
+  onboardingDone: false,
+  name: "",
+  scores: { vocab: 3, grammar: 3, reading: 3, sentence: 3, spelling: 3 },
+  focusArea: null,           // התשובה לשאלת הביטחון
+  xp: 0,
+  streak: 0,
+  lastActiveDate: null,
+  dailyDoneDate: null,       // האם המשימה היומית הושלמה היום
+  srs: {},                   // { wordId: { box, due } } — חזרה מרווחת
+  recent: { vocab: [], grammar: [], reading: [], sentence: [], spelling: [] }, // ביצועים אחרונים לקושי דינמי
+  settings: { apiKey: "", sound: true },
+};
+
+function loadProfile() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_PROFILE };
+    const saved = JSON.parse(raw);
+    // מיזוג עם ברירת המחדל כדי לא להישבר אם נוספו שדות בגרסה חדשה
+    return { ...DEFAULT_PROFILE, ...saved,
+      scores: { ...DEFAULT_PROFILE.scores, ...(saved.scores||{}) },
+      recent: { ...DEFAULT_PROFILE.recent, ...(saved.recent||{}) },
+      settings: { ...DEFAULT_PROFILE.settings, ...(saved.settings||{}) } };
+  } catch (e) { return { ...DEFAULT_PROFILE }; }
+}
+
+function saveProfile(p) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch (e) {}
+}
+
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function yesterdayStr() { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); }
+
+// רמות לפי XP
+function levelFromXp(xp) { return Math.floor(Math.sqrt(xp / 60)) + 1; }
+function xpForLevel(lv) { return Math.pow(lv - 1, 2) * 60; }
+
+/* ============================================================
+   צליל ודיבור
+   ============================================================ */
+
+let audioCtx = null;
+function playTone(good, enabled) {
+  if (!enabled) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    const freqs = good ? [523, 659, 784] : [330, 247];
+    freqs.forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = f; o.type = "sine";
+      g.gain.setValueAtTime(0.12, now + i * 0.09);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.09 + 0.25);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(now + i * 0.09); o.stop(now + i * 0.09 + 0.3);
+    });
+  } catch (e) {}
+}
+
+function speak(text, rate) {
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US"; u.rate = rate || 0.9;
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice = voices.find(v => v.lang.startsWith("en"));
+    if (enVoice) u.voice = enVoice;
+    window.speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+/* ============================================================
+   שכבת AI אופציונלית — Anthropic API
+   כישלון בקריאה לעולם לא שובר את האפליקציה: נופלים חזרה למאגר המובנה
+   ============================================================ */
+
+async function callClaude(apiKey, systemPrompt, userPrompt, schema) {
+  const body = {
+    model: "claude-opus-4-8",
+    max_tokens: 2000,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
+  };
+  if (schema) body.output_config = { format: { type: "json_schema", schema } };
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      // הכרחי לקריאות ישירות מהדפדפן (CORS)
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("API error " + res.status);
+  const data = await res.json();
+  if (data.stop_reason === "refusal" || !data.content || !data.content.length) throw new Error("empty response");
+  const textBlock = data.content.find(b => b.type === "text");
+  if (!textBlock) throw new Error("no text");
+  return textBlock.text;
+}
+
+// יצירת תרגילי דקדוק חדשים מותאמים לפרופיל
+async function aiGenerateGrammar(apiKey, profile) {
+  const schema = {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            q: { type: "string" }, options: { type: "array", items: { type: "string" } },
+            answer: { type: "string" }, explain: { type: "string" },
+          },
+          required: ["q", "options", "answer", "explain"], additionalProperties: false,
+        },
+      },
+    },
+    required: ["items"], additionalProperties: false,
+  };
+  const level = profile.scores.grammar;
+  const text = await callClaude(apiKey,
+    "You create English grammar exercises for Hebrew-speaking middle school students (ages 12-15). Questions are fill-in-the-blank sentences in English with 3 options. The 'explain' field must be a short, friendly explanation in Hebrew.",
+    `Create 5 grammar exercises at difficulty ${level} out of 5. Focus on tenses (present/past/future/present perfect) and word order. The student's weak area: ${profile.focusArea || "general"}. Each question is an English sentence with ___ for the blank.`,
+    schema);
+  const parsed = JSON.parse(text);
+  return parsed.items.filter(it => it.q && it.options && it.options.includes(it.answer))
+    .map((it, i) => ({ ...it, id: "ai-g" + Date.now() + i, level }));
+}
+
+// יצירת מילים חדשות לאוצר מילים
+async function aiGenerateVocab(apiKey, profile) {
+  const schema = {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            en: { type: "string" }, he: { type: "string" }, sentence: { type: "string" },
+          },
+          required: ["en", "he", "sentence"], additionalProperties: false,
+        },
+      },
+    },
+    required: ["items"], additionalProperties: false,
+  };
+  const known = VOCAB.map(v => v.en).join(", ");
+  const text = await callClaude(apiKey,
+    "You create English vocabulary cards for Hebrew-speaking middle school students (ages 12-15). 'he' is the Hebrew translation, 'sentence' is a simple example sentence in English.",
+    `Create 6 useful English words at difficulty ${profile.scores.vocab} out of 5. Do NOT use these words: ${known}.`,
+    schema);
+  const parsed = JSON.parse(text);
+  return parsed.items.map((it, i) => ({ ...it, id: "ai-v" + Date.now() + i, level: profile.scores.vocab }));
+}
+
+// הסבר מותאם אישית כשטועים
+async function aiExplainMistake(apiKey, question, wrongAnswer, correctAnswer) {
+  return await callClaude(apiKey,
+    "You are a friendly English tutor for Hebrew-speaking teens. Answer in simple Hebrew (2-3 sentences max), encouraging tone, never judgmental. You may include English words for the grammar terms.",
+    `The student answered "${wrongAnswer}" but the correct answer is "${correctAnswer}" for the question: "${question}". Explain the rule briefly in Hebrew.`);
+}
+
+/* ============================================================
+   רכיבי UI כלליים
+   ============================================================ */
+
+function ProgressBar({ value, max, color }) {
+  return (
+    <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+      <div className={`h-full rounded-full transition-all duration-500 ${color || "bg-indigo-500"}`}
+           style={{ width: Math.min(100, (value / max) * 100) + "%" }} />
+    </div>
+  );
+}
+
+function BigButton({ onClick, children, color, disabled, className }) {
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className={`w-full py-4 px-6 rounded-2xl text-lg font-bold text-white shadow-lg active:scale-95 transition-transform disabled:opacity-40 ${color || "bg-indigo-600"} ${className || ""}`}>
+      {children}
+    </button>
+  );
+}
+
+// כפתור תשובה במבחנים — עם צביעה אחרי בחירה
+function AnswerButton({ text, state, onClick, ltr }) {
+  const base = "w-full py-3.5 px-4 rounded-xl text-lg font-semibold border-2 transition-all active:scale-95 no-select";
+  const styles = {
+    idle:    "bg-white border-slate-200 text-slate-800 hover:border-indigo-300",
+    correct: "bg-emerald-100 border-emerald-500 text-emerald-800 pop",
+    wrong:   "bg-rose-100 border-rose-400 text-rose-700 shake",
+    dim:     "bg-white border-slate-100 text-slate-400",
+    reveal:  "bg-emerald-50 border-emerald-400 text-emerald-700",
+  };
+  return (
+    <button onClick={onClick} disabled={state !== "idle"}
+      className={`${base} ${styles[state]} ${ltr ? "en" : ""}`}>
+      {text}
+    </button>
+  );
+}
+
+// אנימציית פידבק "+XP"
+function XpFloat({ amount }) {
+  if (!amount) return null;
+  return <div className="fixed top-24 left-1/2 -translate-x-1/2 text-2xl font-black text-amber-500 float-up pointer-events-none z-50">+{amount} XP</div>;
+}
+
+function Toast({ msg }) {
+  if (!msg) return null;
+  return <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-sm px-5 py-3 rounded-full shadow-xl z-50 slide-in">{msg}</div>;
+}
+
+// כותרת מסך פעילות עם חזרה
+function ActivityHeader({ title, icon, onBack, progress, total }) {
+  return (
+    <div className="mb-5">
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={onBack} className="text-slate-500 text-sm font-semibold py-2 px-3 rounded-lg bg-white shadow-sm">→ חזרה</button>
+        <div className="text-lg font-bold text-slate-700">{icon} {title}</div>
+      </div>
+      {total > 0 && <ProgressBar value={progress} max={total} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   שלב 1 — שאלון אבחון אדפטיבי
+   ============================================================ */
+
+// סדר התחומים בשאלון: 10 שאלות, אחת על המסך בכל פעם
+const DIAG_SEQUENCE = ["vocab","vocab","grammar","grammar","reading","sentence","sentence","spelling","spelling","confidence"];
+
+// בוחר שאלה לתחום ברמת קושי נתונה (1-3), בלי לחזור על שאלות
+function pickDiagQuestion(domain, difficulty, usedIds) {
+  let pool = [];
+  if (domain === "vocab") {
+    pool = VOCAB.filter(v => v.level === difficulty && !usedIds.has(v.id)).map(v => {
+      const wrong = VOCAB.filter(o => o.id !== v.id).sort(() => Math.random() - 0.5).slice(0, 2).map(o => o.he);
+      return { domain, id: v.id, prompt: "מה הפירוש של המילה:", enText: v.en,
+               options: shuffle([v.he, ...wrong]), answer: v.he };
+    });
+  } else if (domain === "grammar") {
+    pool = GRAMMAR.filter(g => g.level === difficulty && !usedIds.has(g.id)).map(g => ({
+      domain, id: g.id, prompt: "השלימו את המשפט:", enText: g.q,
+      options: g.options, answer: g.answer, ltrOptions: true,
+    }));
+  } else if (domain === "reading") {
+    pool = READING.filter(r => r.level === difficulty && !usedIds.has(r.id)).map(r => ({
+      domain, id: r.id, prompt: "קראו את הקטע וענו:", passage: r.text,
+      enText: r.questions[0].q, options: r.questions[0].options, answer: r.questions[0].answer, ltrOptions: true,
+    }));
+  } else if (domain === "sentence") {
+    pool = SENTENCES.filter(s => s.level === difficulty && !usedIds.has(s.id)).map(s => ({
+      domain, id: s.id, prompt: "סדרו את המילים למשפט תקין:", sentence: s,
+    }));
+  } else if (domain === "spelling") {
+    pool = SPELLING.filter(p => p.level === difficulty && !usedIds.has(p.id)).map(p => ({
+      domain, id: p.id,
+      prompt: p.type === "missing" ? `איזו אות חסרה במילה? (${p.he})` : `מה הכתיב הנכון? (${p.he})`,
+      enText: p.type === "missing" ? p.display : null,
+      options: p.options, answer: p.answer, ltrOptions: true,
+    }));
+  }
+  if (!pool.length) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
+
+// חישוב ציון 1-5 לכל תחום מתוך תשובות האבחון
+function computeScores(answers) {
+  const scores = {};
+  Object.keys(DOMAINS).forEach(domain => {
+    const rel = answers.filter(a => a.domain === domain);
+    if (!rel.length) { scores[domain] = 3; return; }
+    // תשובה נכונה ברמה d שווה d+2, טעות ברמה d שווה d-1 — ואז ממוצע, תחום 1-5
+    const avg = rel.reduce((sum, a) => sum + (a.correct ? a.difficulty + 2 : a.difficulty - 1), 0) / rel.length;
+    scores[domain] = Math.max(1, Math.min(5, Math.round(avg)));
+  });
+  return scores;
+}
+
+const CONFIDENCE_OPTIONS = [
+  { id:"speak",   label:"לדבר ולהגות מילים" },
+  { id:"vocab",   label:"להבין מילים חדשות" },
+  { id:"grammar", label:"דקדוק וזמנים" },
+  { id:"reading", label:"לקרוא טקסטים ארוכים" },
+  { id:"spelling",label:"לכתוב בלי שגיאות כתיב" },
+  { id:"ok",      label:"בעצם... די בסדר לי 😎" },
+];
+
+function DiagnosticScreen({ onComplete, sound }) {
+  const [step, setStep] = useState(0);
+  const [difficulty, setDifficulty] = useState({ vocab:2, grammar:2, reading:2, sentence:2, spelling:2 });
+  const [answers, setAnswers] = useState([]);
+  const [question, setQuestion] = useState(null);
+  const [answerState, setAnswerState] = useState({}); // option -> state
+  const [locked, setLocked] = useState(false);
+  const usedIds = useRef(new Set());
+
+  const total = DIAG_SEQUENCE.length;
+  const domain = DIAG_SEQUENCE[step];
+
+  useEffect(() => {
+    if (domain && domain !== "confidence") {
+      // אדפטיבי: אם אין שאלה ברמה המבוקשת, מנסים רמות שכנות
+      let q = pickDiagQuestion(domain, difficulty[domain], usedIds.current);
+      if (!q) q = pickDiagQuestion(domain, Math.max(1, difficulty[domain]-1), usedIds.current);
+      if (!q) q = pickDiagQuestion(domain, Math.min(3, difficulty[domain]+1), usedIds.current);
+      if (q) usedIds.current.add(q.id);
+      setQuestion(q);
+      setAnswerState({});
+      setLocked(false);
+    }
+  }, [step]);
+
+  function recordAnswer(correct) {
+    const d = difficulty[domain];
+    setAnswers(prev => [...prev, { domain, difficulty: d, correct }]);
+    // התאמת קושי: צדק — מקשים, טעה — מקלים. בלי עונשים, רק איסוף מידע.
+    setDifficulty(prev => ({ ...prev, [domain]: correct ? Math.min(3, d+1) : Math.max(1, d-1) }));
+    playTone(correct, sound);
+    setTimeout(() => setStep(s => s + 1), correct ? 700 : 1100);
+  }
+
+  function handleOption(opt) {
+    if (locked) return;
+    setLocked(true);
+    const correct = opt === question.answer;
+    const st = {};
+    question.options.forEach(o => {
+      st[o] = o === opt ? (correct ? "correct" : "wrong") : (o === question.answer && !correct ? "reveal" : "dim");
+    });
+    setAnswerState(st);
+    recordAnswer(correct);
+  }
+
+  function handleConfidence(opt) {
+    const scores = computeScores(answers);
+    onComplete(scores, opt.id);
+  }
+
+  if (step >= total) return null;
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen flex flex-col">
+      <div className="mb-6 mt-2">
+        <div className="flex justify-between text-sm text-slate-500 mb-2">
+          <span>שאלה {step + 1} מתוך {total}</span>
+          <span>🕹️ משחק היכרות</span>
+        </div>
+        <ProgressBar value={step} max={total} color="bg-gradient-to-l from-indigo-500 to-fuchsia-500" />
+      </div>
+
+      {domain === "confidence" ? (
+        <div className="slide-in">
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">שאלה אחרונה 💬</h2>
+          <p className="text-slate-600 mb-6">מה הכי מאתגר אותך באנגלית? (אין תשובה לא נכונה)</p>
+          <div className="space-y-3">
+            {CONFIDENCE_OPTIONS.map(o => (
+              <AnswerButton key={o.id} text={o.label} state="idle" onClick={() => handleConfidence(o)} />
+            ))}
+          </div>
+        </div>
+      ) : question ? (
+        <div className="slide-in" key={step}>
+          <div className="text-sm font-bold text-indigo-500 mb-1">{DOMAINS[domain].icon} {DOMAINS[domain].name}</div>
+          <h2 className="text-xl font-bold text-slate-800 mb-4">{question.prompt}</h2>
+          {question.passage && (
+            <div className="en bg-white rounded-2xl p-4 mb-4 text-base leading-relaxed shadow-sm border border-slate-100">{question.passage}</div>
+          )}
+          {question.enText && (
+            <div className="en text-2xl font-bold text-center bg-white rounded-2xl py-5 px-4 mb-5 shadow-sm border border-slate-100">{question.enText}</div>
+          )}
+          {question.sentence ? (
+            <SentenceBuilder item={question.sentence} onDone={recordAnswer} sound={sound} hideFeedbackDelay />
+          ) : (
+            <div className="space-y-3">
+              {question.options.map(o => (
+                <AnswerButton key={o} text={o} ltr={question.ltrOptions} state={answerState[o] || "idle"} onClick={() => handleOption(o)} />
+              ))}
+            </div>
+          )}
+          <p className="text-center text-xs text-slate-400 mt-6">אין נקודות ואין ציונים כאן — רק לומדים להכיר אותך 🙂</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
+   רכיב בניית משפט (משמש גם באבחון וגם בתרגול)
+   טאפ על מילים במקום גרירה — נוח יותר במגע
+   ============================================================ */
+
+function SentenceBuilder({ item, onDone, sound }) {
+  const words = item.answer.split(" ");
+  const [bank, setBank] = useState(() => shuffle(words.map((w, i) => ({ w, i }))));
+  const [chosen, setChosen] = useState([]);
+  const [result, setResult] = useState(null); // null | true | false
+
+  function pick(tok) {
+    if (result !== null) return;
+    setBank(b => b.filter(t => t.i !== tok.i));
+    setChosen(c => [...c, tok]);
+  }
+  function unpick(tok) {
+    if (result !== null) return;
+    setChosen(c => c.filter(t => t.i !== tok.i));
+    setBank(b => [...b, tok]);
+  }
+
+  useEffect(() => {
+    if (chosen.length === words.length && result === null) {
+      const built = chosen.map(t => t.w).join(" ");
+      const ok = built.toLowerCase() === item.answer.toLowerCase();
+      setResult(ok);
+      playTone(ok, sound);
+      setTimeout(() => onDone(ok), ok ? 800 : 1600);
+    }
+  }, [chosen]);
+
+  return (
+    <div>
+      {item.he && <div className="text-center text-slate-500 mb-3">💡 רמז: "{item.he}"</div>}
+      <div className={`en min-h-[64px] bg-white rounded-2xl p-3 mb-4 flex flex-wrap gap-2 items-center justify-center border-2 ${
+        result === true ? "border-emerald-400 bg-emerald-50" : result === false ? "border-rose-300 bg-rose-50" : "border-dashed border-slate-300"}`}>
+        {chosen.length === 0 && <span className="text-slate-300 text-sm">הקישו על המילים לפי הסדר</span>}
+        {chosen.map(tok => (
+          <button key={tok.i} onClick={() => unpick(tok)}
+            className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded-xl font-semibold text-lg no-select active:scale-95">{tok.w}</button>
+        ))}
+      </div>
+      <div className="en flex flex-wrap gap-2 justify-center mb-2">
+        {bank.map(tok => (
+          <button key={tok.i} onClick={() => pick(tok)}
+            className="px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-semibold text-lg shadow-sm no-select active:scale-95">{tok.w}</button>
+        ))}
+      </div>
+      {result === false && (
+        <div className="text-center mt-3 slide-in">
+          <span className="text-slate-500 text-sm">המשפט הנכון: </span>
+          <span className="en font-bold text-emerald-600">{item.answer}</span>
+        </div>
+      )}
+      {result === true && <div className="text-center mt-2 text-emerald-600 font-bold text-lg pop">מעולה! 🎉</div>}
+    </div>
+  );
+}
+
+/* ============================================================
+   שלב 2 — כרטיס שחקן (תוצאות האבחון)
+   ============================================================ */
+
+function PlayerCardScreen({ profile, onContinue }) {
+  const entries = Object.entries(profile.scores);
+  const sorted = [...entries].sort((a, b) => b[1] - a[1]);
+  const strongest = sorted[0], weakest = sorted[sorted.length - 1];
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen flex flex-col justify-center">
+      <div className="bg-gradient-to-br from-indigo-600 to-fuchsia-600 rounded-3xl p-6 text-white shadow-2xl slide-in">
+        <div className="text-center mb-5">
+          <div className="text-5xl mb-2">🎮</div>
+          <h1 className="text-2xl font-black">כרטיס השחקן שלך</h1>
+          <p className="text-indigo-200 text-sm mt-1">הנה מה שגילינו — בלי ציונים, רק נקודת פתיחה</p>
+        </div>
+        <div className="space-y-3 mb-5">
+          {entries.map(([key, score]) => (
+            <div key={key} className="flex items-center gap-3">
+              <span className="w-32 text-sm font-semibold">{DOMAINS[key].icon} {DOMAINS[key].name}</span>
+              <div className="flex-1 h-3 bg-white/20 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-300 rounded-full transition-all duration-700" style={{ width: (score / 5) * 100 + "%" }} />
+              </div>
+              <span className="text-xs w-10 text-left">{"⭐".repeat(Math.max(1, Math.round(score/2)))}</span>
+            </div>
+          ))}
+        </div>
+        <div className="bg-white/15 rounded-2xl p-4 text-sm leading-relaxed">
+          <p>💪 <b>חזק אצלך:</b> {DOMAINS[strongest[0]].name} — כל הכבוד!</p>
+          <p className="mt-1">🎯 <b>נעבוד יחד על:</b> {DOMAINS[weakest[0]].name} — צעד-צעד, בקצב שלך.</p>
+          {profile.focusArea === "ok" && <p className="mt-1">😎 ואמרת שדי בסדר לך — אז נרים את הרף!</p>}
+        </div>
+      </div>
+      <div className="mt-6">
+        <BigButton onClick={onContinue} color="bg-emerald-500">יאללה, מתחילים! 🚀</BigButton>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   שלב 3 — מסך הבית והמסלול האישי
+   ============================================================ */
+
+// בוחר את התחום המומלץ הבא: עדיפות לתחומים חלשים
+function recommendedDomain(profile) {
+  const entries = Object.entries(profile.scores).sort((a, b) => a[1] - b[1]);
+  // קצת גיוון: 70% התחום הכי חלש, 30% השני
+  return (Math.random() < 0.7 ? entries[0] : entries[1])[0];
+}
+
+const ACTIVITY_OF_DOMAIN = { vocab:"flashcards", grammar:"grammar", reading:"reading", sentence:"sentence", spelling:"spelling" };
+
+function HomeScreen({ profile, onStart, onSettings }) {
+  const level = levelFromXp(profile.xp);
+  const nextLevelXp = xpForLevel(level + 1);
+  const prevLevelXp = xpForLevel(level);
+  const dailyDone = profile.dailyDoneDate === todayStr();
+  const recDomain = recommendedDomain(profile);
+
+  const activities = [
+    { id:"flashcards", domain:"vocab",    name:"כרטיסיות מילים",  desc:"חזרה חכמה על מילים" },
+    { id:"grammar",    domain:"grammar",  name:"מעבדת דקדוק",     desc:"זמנים והשלמות" },
+    { id:"reading",    domain:"reading",  name:"בלשי קריאה",      desc:"קטע קצר + שאלות" },
+    { id:"sentence",   domain:"sentence", name:"בונה המשפטים",    desc:"סדרו מילים למשפט" },
+    { id:"spelling",   domain:"spelling", name:"צייד האיות",      desc:"אותיות חסרות וכתיב" },
+    { id:"listening",  domain:"vocab",    name:"אוזן זהב 🎧",      desc:"האזנה והגייה" },
+  ];
+
+  return (
+    <div className="max-w-lg mx-auto p-5 pb-10">
+      <div className="flex items-center justify-between mt-2 mb-5">
+        <h1 className="text-2xl font-black text-slate-800">EnglishQuest</h1>
+        <button onClick={onSettings} className="text-2xl p-2 bg-white rounded-xl shadow-sm">⚙️</button>
+      </div>
+
+      {/* סטטוס: streak ורמה */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
+          <div className="text-3xl">{profile.streak > 0 ? "🔥" : "❄️"}</div>
+          <div className="text-2xl font-black text-slate-800">{profile.streak}</div>
+          <div className="text-xs text-slate-500">ימים ברצף</div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
+          <div className="text-3xl">🏆</div>
+          <div className="text-2xl font-black text-slate-800">רמה {level}</div>
+          <div className="mt-1"><ProgressBar value={profile.xp - prevLevelXp} max={nextLevelXp - prevLevelXp} color="bg-amber-400" /></div>
+          <div className="text-xs text-slate-500 mt-1">{profile.xp} XP</div>
+        </div>
+      </div>
+
+      {/* משימה יומית קצרה */}
+      <div className={`rounded-2xl p-4 mb-5 shadow-sm ${dailyDone ? "bg-emerald-50 border border-emerald-200" : "bg-amber-50 border border-amber-200"}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-bold text-slate-800">{dailyDone ? "✅ המשימה היומית הושלמה!" : "⚡ משימת 3 דקות להיום"}</div>
+            <div className="text-sm text-slate-600">{dailyDone ? "חוזרים מחר לשמור על הרצף 🔥" : "סבב קצר אחד בתחום שכדאי לחזק"}</div>
+          </div>
+          {!dailyDone && (
+            <button onClick={() => onStart(ACTIVITY_OF_DOMAIN[recDomain], true)}
+              className="bg-amber-400 text-amber-900 font-bold px-4 py-2 rounded-xl shadow active:scale-95">קדימה</button>
+          )}
+        </div>
+      </div>
+
+      {/* כפתור המשך גדול — המסלול האישי */}
+      <BigButton onClick={() => onStart(ACTIVITY_OF_DOMAIN[recDomain], false)}
+        color="bg-gradient-to-l from-indigo-600 to-fuchsia-600" className="mb-6">
+        ▶️ המשך ללמוד — {DOMAINS[recDomain].name}
+      </BigButton>
+
+      {/* כל הפעילויות */}
+      <h2 className="font-bold text-slate-700 mb-3">או בחרו אתגר:</h2>
+      <div className="grid grid-cols-2 gap-3">
+        {activities.map(a => (
+          <button key={a.id} onClick={() => onStart(a.id, false)}
+            className="bg-white rounded-2xl p-4 shadow-sm text-right active:scale-95 transition-transform">
+            <div className={`w-10 h-10 rounded-xl ${DOMAINS[a.domain].color} text-white text-xl flex items-center justify-center mb-2`}>{DOMAINS[a.domain].icon}</div>
+            <div className="font-bold text-slate-800 text-sm">{a.name}</div>
+            <div className="text-xs text-slate-500">{a.desc}</div>
+            <div className="text-[10px] text-slate-400 mt-1">רמה {profile.scores[a.domain]}/5</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   קושי דינמי בפעילויות
+   ============================================================ */
+
+// רמת קושי נוכחית (1-3) לפי ציון הפרופיל + ביצועים אחרונים בסשן
+function dynamicLevel(profile, domain, sessionResults) {
+  let base = Math.max(1, Math.min(3, Math.ceil(profile.scores[domain] / 2)));
+  const recent = sessionResults.slice(-3);
+  if (recent.length >= 2) {
+    if (recent.every(r => r)) base = Math.min(3, base + 1);
+    else if (recent.every(r => !r)) base = Math.max(1, base - 1);
+  }
+  return base;
+}
+
+// עדכון פרופיל אחרי פעילות: XP, streak, ציון תחום, משימה יומית
+function applySessionToProfile(profile, domain, results, xpGained, isDaily) {
+  const p = { ...profile };
+  p.xp += xpGained;
+  // עדכון עדין של ציון התחום לפי הצלחה בסשן
+  const rate = results.length ? results.filter(Boolean).length / results.length : 0.5;
+  const cur = p.scores[domain];
+  if (rate >= 0.8 && results.length >= 4) p.scores = { ...p.scores, [domain]: Math.min(5, cur + 1) };
+  else if (rate <= 0.3 && results.length >= 4) p.scores = { ...p.scores, [domain]: Math.max(1, cur - 1) };
+  // streak יומי
+  const today = todayStr();
+  if (p.lastActiveDate !== today) {
+    p.streak = p.lastActiveDate === yesterdayStr() ? p.streak + 1 : 1;
+    p.lastActiveDate = today;
+  }
+  if (isDaily) p.dailyDoneDate = today;
+  p.recent = { ...p.recent, [domain]: [...(p.recent[domain] || []), ...results].slice(-20) };
+  return p;
+}
+
+/* ============================================================
+   פעילות: כרטיסיות מילים — חזרה מרווחת (Leitner)
+   ============================================================ */
+
+const SRS_INTERVALS_DAYS = [0, 1, 2, 4, 7, 14]; // לפי קופסה 0-5
+
+function dueWords(profile, extraWords) {
+  const now = Date.now();
+  const all = [...VOCAB, ...(extraWords || [])];
+  const due = all.filter(w => {
+    const s = profile.srs[w.id];
+    return !s || s.due <= now;
+  });
+  // קודם מילים שכבר טעינו בהן (קופסה נמוכה), אחר כך חדשות מתאימות לרמה
+  const lvl = Math.max(1, Math.min(3, Math.ceil(profile.scores.vocab / 2)));
+  due.sort((a, b) => {
+    const sa = profile.srs[a.id] ? profile.srs[a.id].box : 99;
+    const sb = profile.srs[b.id] ? profile.srs[b.id].box : 99;
+    if (sa !== sb) return sa - sb;
+    return Math.abs((a.level||2) - lvl) - Math.abs((b.level||2) - lvl);
+  });
+  return due;
+}
+
+function FlashcardsActivity({ profile, onFinish, onBack, showToast }) {
+  const SESSION_SIZE = 7;
+  const [aiWords, setAiWords] = useState([]);
+  const [queue, setQueue] = useState(() => dueWords(profile).slice(0, SESSION_SIZE));
+  const [idx, setIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [results, setResults] = useState([]);
+  const [srsUpdates, setSrsUpdates] = useState({});
+  const [loadingAi, setLoadingAi] = useState(false);
+
+  const word = queue[idx];
+  const sound = profile.settings.sound;
+
+  function grade(knew) {
+    playTone(knew, sound);
+    const cur = profile.srs[word.id] || { box: 0 };
+    const newBox = knew ? Math.min(5, cur.box + 1) : 0;
+    const due = Date.now() + SRS_INTERVALS_DAYS[newBox] * 24 * 3600 * 1000;
+    setSrsUpdates(u => ({ ...u, [word.id]: { box: newBox, due } }));
+    setResults(r => [...r, knew]);
+    setFlipped(false);
+    if (idx + 1 >= queue.length) {
+      finish([...results, knew], { ...srsUpdates, [word.id]: { box: newBox, due } });
+    } else setIdx(i => i + 1);
+  }
+
+  function finish(allResults, allSrs) {
+    const xp = allResults.filter(Boolean).length * 10 + 5;
+    onFinish("vocab", allResults, xp, allSrs);
+  }
+
+  async function loadAiWords() {
+    setLoadingAi(true);
+    try {
+      const items = await aiGenerateVocab(profile.settings.apiKey, profile);
+      setAiWords(items);
+      setQueue(q => [...q, ...items]);
+      showToast("✨ נוספו מילים חדשות מותאמות אישית!");
+    } catch (e) {
+      showToast("ה-AI לא זמין כרגע — ממשיכים עם המאגר המובנה 🙂");
+    }
+    setLoadingAi(false);
+  }
+
+  if (!word) {
+    return (
+      <div className="max-w-lg mx-auto p-5 min-h-screen flex flex-col justify-center text-center">
+        <div className="text-5xl mb-3">🌴</div>
+        <h2 className="text-xl font-bold text-slate-800 mb-2">אין מילים שמחכות לחזרה כרגע!</h2>
+        <p className="text-slate-500 mb-6">החזרה המרווחת תחזיר מילים בדיוק כשתתחילו לשכוח אותן.</p>
+        <BigButton onClick={onBack}>חזרה הביתה</BigButton>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="כרטיסיות מילים" icon="📚" onBack={onBack} progress={idx} total={queue.length} />
+      <div key={word.id + (flipped ? "b" : "f")}
+        onClick={() => setFlipped(f => !f)}
+        className="bg-white rounded-3xl shadow-lg p-8 min-h-[260px] flex flex-col items-center justify-center cursor-pointer pop no-select">
+        {!flipped ? (
+          <React.Fragment>
+            <div className="en text-4xl font-black text-slate-800 mb-3">{word.en}</div>
+            <button onClick={e => { e.stopPropagation(); speak(word.en); }}
+              className="text-2xl bg-indigo-50 rounded-full w-12 h-12 mb-4">🔊</button>
+            <div className="text-slate-400 text-sm">הקישו על הכרטיס כדי להפוך</div>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <div className="text-3xl font-black text-indigo-600 mb-3">{word.he}</div>
+            <div className="en text-base text-slate-500 text-center mb-2">"{word.sentence}"</div>
+            <button onClick={e => { e.stopPropagation(); speak(word.sentence); }}
+              className="text-xl bg-indigo-50 rounded-full w-10 h-10">🔊</button>
+          </React.Fragment>
+        )}
+      </div>
+      {flipped && (
+        <div className="grid grid-cols-2 gap-3 mt-5 slide-in">
+          <BigButton onClick={() => grade(false)} color="bg-rose-400">😅 עוד לא</BigButton>
+          <BigButton onClick={() => grade(true)} color="bg-emerald-500">😎 ידעתי!</BigButton>
+        </div>
+      )}
+      {!flipped && <p className="text-center text-slate-400 text-sm mt-5">נסו להיזכר בפירוש — ואז הפכו את הכרטיס</p>}
+      {profile.settings.apiKey && !aiWords.length && (
+        <button onClick={loadAiWords} disabled={loadingAi}
+          className="mt-6 w-full text-sm text-indigo-500 font-semibold py-2">
+          {loadingAi ? "טוען מילים חדשות..." : "✨ הוסיפו מילים חדשות מותאמות אישית (AI)"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   פעילות: דקדוק אינטראקטיבי
+   ============================================================ */
+
+function GrammarActivity({ profile, onFinish, onBack, showToast }) {
+  const SESSION_SIZE = 6;
+  const [items, setItems] = useState(() => buildSession());
+  const [idx, setIdx] = useState(0);
+  const [results, setResults] = useState([]);
+  const resultsRef = useRef([]); // מונע איבוד התשובה האחרונה בגלל closure ישן ב-setTimeout
+  const [answerState, setAnswerState] = useState({});
+  const [locked, setLocked] = useState(false);
+  const [explainText, setExplainText] = useState(null);
+  const [aiExplaining, setAiExplaining] = useState(false);
+  const [loadingAi, setLoadingAi] = useState(false);
+  const sound = profile.settings.sound;
+
+  function buildSession() {
+    const lvl = dynamicLevel(profile, "grammar", []);
+    const pool = shuffle(GRAMMAR.filter(g => Math.abs(g.level - lvl) <= 1));
+    return pool.slice(0, SESSION_SIZE);
+  }
+
+  const item = items[idx];
+
+  function handleOption(opt) {
+    if (locked) return;
+    setLocked(true);
+    const correct = opt === item.answer;
+    const st = {};
+    item.options.forEach(o => {
+      st[o] = o === opt ? (correct ? "correct" : "wrong") : (o === item.answer && !correct ? "reveal" : "dim");
+    });
+    setAnswerState(st);
+    resultsRef.current = [...resultsRef.current, correct];
+    setResults(resultsRef.current);
+    playTone(correct, sound);
+    if (!correct) setExplainText(item.explain);
+    else setTimeout(next, 800);
+  }
+
+  function next() {
+    setExplainText(null); setAnswerState({}); setLocked(false);
+    if (idx + 1 >= items.length) {
+      const all = resultsRef.current;
+      const xp = all.filter(Boolean).length * 12 + 5;
+      onFinish("grammar", all, xp);
+    } else setIdx(i => i + 1);
+  }
+
+  async function askAi() {
+    setAiExplaining(true);
+    try {
+      const lastWrong = Object.keys(answerState).find(k => answerState[k] === "wrong");
+      const text = await aiExplainMistake(profile.settings.apiKey, item.q, lastWrong, item.answer);
+      setExplainText(text);
+    } catch (e) { showToast("ה-AI לא זמין כרגע — ההסבר המובנה עדיין כאן 🙂"); }
+    setAiExplaining(false);
+  }
+
+  async function loadAiItems() {
+    setLoadingAi(true);
+    try {
+      const newItems = await aiGenerateGrammar(profile.settings.apiKey, profile);
+      setItems(prev => [...prev, ...newItems]);
+      showToast("✨ נוספו תרגילים חדשים מותאמים אישית!");
+    } catch (e) { showToast("ה-AI לא זמין כרגע — ממשיכים עם המאגר המובנה 🙂"); }
+    setLoadingAi(false);
+  }
+
+  if (!item) return null;
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="מעבדת דקדוק" icon="🧩" onBack={onBack} progress={idx} total={items.length} />
+      <h2 className="text-lg font-bold text-slate-700 mb-3">השלימו את המשפט:</h2>
+      <div className="en text-2xl font-bold text-center bg-white rounded-2xl py-6 px-4 mb-5 shadow-sm border border-slate-100" key={item.id}>{item.q}</div>
+      <div className="space-y-3">
+        {item.options.map(o => (
+          <AnswerButton key={o} text={o} ltr state={answerState[o] || "idle"} onClick={() => handleOption(o)} />
+        ))}
+      </div>
+      {explainText && (
+        <div className="mt-5 bg-sky-50 border border-sky-200 rounded-2xl p-4 slide-in">
+          <div className="font-bold text-sky-700 mb-1">💡 רגע של למידה</div>
+          <p className="text-slate-700 text-sm leading-relaxed">{explainText}</p>
+          {profile.settings.apiKey && (
+            <button onClick={askAi} disabled={aiExplaining} className="text-indigo-500 text-xs font-semibold mt-2">
+              {aiExplaining ? "חושב..." : "✨ הסבר מותאם אישית (AI)"}
+            </button>
+          )}
+          <div className="mt-3"><BigButton onClick={next} color="bg-sky-500">הבנתי, ממשיכים →</BigButton></div>
+        </div>
+      )}
+      {profile.settings.apiKey && idx === items.length - 1 && !explainText && (
+        <button onClick={loadAiItems} disabled={loadingAi} className="mt-6 w-full text-sm text-indigo-500 font-semibold py-2">
+          {loadingAi ? "יוצר תרגילים..." : "✨ עוד תרגילים מותאמים אישית (AI)"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   פעילות: הבנת הנקרא
+   ============================================================ */
+
+function ReadingActivity({ profile, onFinish, onBack }) {
+  const [passage] = useState(() => {
+    const lvl = dynamicLevel(profile, "reading", []);
+    const pool = READING.filter(r => Math.abs(r.level - lvl) <= 1);
+    return pool[Math.floor(Math.random() * pool.length)] || READING[0];
+  });
+  const [qIdx, setQIdx] = useState(0);
+  const [results, setResults] = useState([]);
+  const [answerState, setAnswerState] = useState({});
+  const [locked, setLocked] = useState(false);
+  const sound = profile.settings.sound;
+
+  const question = passage.questions[qIdx];
+
+  function handleOption(opt) {
+    if (locked) return;
+    setLocked(true);
+    const correct = opt === question.answer;
+    const st = {};
+    question.options.forEach(o => {
+      st[o] = o === opt ? (correct ? "correct" : "wrong") : (o === question.answer && !correct ? "reveal" : "dim");
+    });
+    setAnswerState(st);
+    playTone(correct, sound);
+    const newResults = [...results, correct];
+    setResults(newResults);
+    setTimeout(() => {
+      setAnswerState({}); setLocked(false);
+      if (qIdx + 1 >= passage.questions.length) {
+        const xp = newResults.filter(Boolean).length * 15 + 5;
+        onFinish("reading", newResults, xp);
+      } else setQIdx(i => i + 1);
+    }, correct ? 800 : 1500);
+  }
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="בלשי קריאה" icon="📖" onBack={onBack} progress={qIdx} total={passage.questions.length} />
+      <div className="en bg-white rounded-2xl p-5 mb-4 text-base leading-relaxed shadow-sm border border-slate-100">
+        {passage.text}
+        <button onClick={() => speak(passage.text)} className="block mt-3 text-sm text-indigo-500 font-semibold" style={{direction:"rtl"}}>🔊 הקראה</button>
+      </div>
+      <div className="en text-lg font-bold mb-4">{question.q}</div>
+      <div className="space-y-3">
+        {question.options.map(o => (
+          <AnswerButton key={o} text={o} ltr state={answerState[o] || "idle"} onClick={() => handleOption(o)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   פעילות: בניית משפטים
+   ============================================================ */
+
+function SentenceActivity({ profile, onFinish, onBack }) {
+  const SESSION_SIZE = 5;
+  const [items] = useState(() => {
+    const lvl = dynamicLevel(profile, "sentence", []);
+    return shuffle(SENTENCES.filter(s => Math.abs(s.level - lvl) <= 1)).slice(0, SESSION_SIZE);
+  });
+  const [idx, setIdx] = useState(0);
+  const [results, setResults] = useState([]);
+  const sound = profile.settings.sound;
+
+  function onDone(ok) {
+    const newResults = [...results, ok];
+    setResults(newResults);
+    if (idx + 1 >= items.length) {
+      const xp = newResults.filter(Boolean).length * 14 + 5;
+      onFinish("sentence", newResults, xp);
+    } else setIdx(i => i + 1);
+  }
+
+  const item = items[idx];
+  if (!item) return null;
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="בונה המשפטים" icon="🔤" onBack={onBack} progress={idx} total={items.length} />
+      <h2 className="text-lg font-bold text-slate-700 mb-4">סדרו את המילים למשפט תקין:</h2>
+      <SentenceBuilder key={item.id} item={item} onDone={onDone} sound={sound} />
+    </div>
+  );
+}
+
+/* ============================================================
+   פעילות: איות
+   ============================================================ */
+
+function SpellingActivity({ profile, onFinish, onBack }) {
+  const SESSION_SIZE = 6;
+  const [items] = useState(() => {
+    const lvl = dynamicLevel(profile, "spelling", []);
+    return shuffle(SPELLING.filter(p => Math.abs(p.level - lvl) <= 1)).slice(0, SESSION_SIZE);
+  });
+  const [idx, setIdx] = useState(0);
+  const [results, setResults] = useState([]);
+  const [answerState, setAnswerState] = useState({});
+  const [locked, setLocked] = useState(false);
+  const sound = profile.settings.sound;
+
+  const item = items[idx];
+
+  function handleOption(opt) {
+    if (locked) return;
+    setLocked(true);
+    const correct = opt === item.answer;
+    const st = {};
+    item.options.forEach(o => {
+      st[o] = o === opt ? (correct ? "correct" : "wrong") : (o === item.answer && !correct ? "reveal" : "dim");
+    });
+    setAnswerState(st);
+    playTone(correct, sound);
+    const newResults = [...results, correct];
+    setResults(newResults);
+    if (correct) speak(item.full || item.answer);
+    setTimeout(() => {
+      setAnswerState({}); setLocked(false);
+      if (idx + 1 >= items.length) {
+        const xp = newResults.filter(Boolean).length * 10 + 5;
+        onFinish("spelling", newResults, xp);
+      } else setIdx(i => i + 1);
+    }, correct ? 900 : 1600);
+  }
+
+  if (!item) return null;
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="צייד האיות" icon="✏️" onBack={onBack} progress={idx} total={items.length} />
+      <h2 className="text-lg font-bold text-slate-700 mb-3">
+        {item.type === "missing" ? "איזו אות חסרה?" : "מה הכתיב הנכון?"}
+        <span className="text-slate-400 text-sm font-normal"> ({item.he})</span>
+      </h2>
+      {item.type === "missing" && (
+        <div className="en text-4xl font-black text-center bg-white rounded-2xl py-7 px-4 mb-5 shadow-sm border border-slate-100 tracking-widest" key={item.id}>{item.display}</div>
+      )}
+      <div className="space-y-3">
+        {item.options.map(o => (
+          <AnswerButton key={o} text={o} ltr state={answerState[o] || "idle"} onClick={() => handleOption(o)} />
+        ))}
+      </div>
+      {!locked && item.type === "missing" && (
+        <button onClick={() => speak(item.full)} className="mt-5 w-full text-sm text-indigo-500 font-semibold">🔊 רמז: שמעו את המילה</button>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   פעילות: האזנה והגייה (Web Speech API)
+   ============================================================ */
+
+function ListeningActivity({ profile, onFinish, onBack }) {
+  const SESSION_SIZE = 5;
+  const [items] = useState(() => {
+    const lvl = Math.max(1, Math.min(3, Math.ceil(profile.scores.vocab / 2)));
+    return shuffle(VOCAB.filter(v => Math.abs(v.level - lvl) <= 1)).slice(0, SESSION_SIZE);
+  });
+  const [idx, setIdx] = useState(0);
+  const [results, setResults] = useState([]);
+  const resultsRef = useRef([]); // מונע איבוד התשובה האחרונה בגלל closure ישן ב-setTimeout
+  const [mode, setMode] = useState("listen"); // listen -> (speak אם נתמך)
+  const [answerState, setAnswerState] = useState({});
+  const [options, setOptions] = useState([]);
+  const [locked, setLocked] = useState(false);
+  const [recState, setRecState] = useState("idle"); // idle | recording | good | tryagain
+  const sound = profile.settings.sound;
+
+  const word = items[idx];
+
+  useEffect(() => {
+    if (!word) return;
+    const wrong = VOCAB.filter(o => o.id !== word.id).sort(() => Math.random()-0.5).slice(0,2).map(o => o.he);
+    setOptions(shuffle([word.he, ...wrong]));
+    setAnswerState({}); setLocked(false); setMode("listen"); setRecState("idle");
+    setTimeout(() => speak(word.en), 400);
+  }, [idx]);
+
+  function handleOption(opt) {
+    if (locked) return;
+    setLocked(true);
+    const correct = opt === word.he;
+    const st = {};
+    options.forEach(o => { st[o] = o === opt ? (correct ? "correct" : "wrong") : (o === word.he && !correct ? "reveal" : "dim"); });
+    setAnswerState(st);
+    playTone(correct, sound);
+    resultsRef.current = [...resultsRef.current, correct];
+    setResults(resultsRef.current);
+    setTimeout(() => {
+      if (SpeechRec) setMode("speak");
+      else next();
+    }, 900);
+  }
+
+  function next() {
+    if (idx + 1 >= items.length) {
+      const all = resultsRef.current;
+      const xp = all.filter(Boolean).length * 12 + 10;
+      onFinish("vocab", all, xp);
+    } else setIdx(i => i + 1);
+  }
+
+  function startRecording() {
+    try {
+      const rec = new SpeechRec();
+      rec.lang = "en-US"; rec.interimResults = false; rec.maxAlternatives = 3;
+      setRecState("recording");
+      rec.onresult = e => {
+        const transcripts = Array.from(e.results[0]).map(r => r.transcript.toLowerCase().trim());
+        const ok = transcripts.some(t => t.includes(word.en.toLowerCase()));
+        setRecState(ok ? "good" : "tryagain");
+        playTone(ok, sound);
+      };
+      rec.onerror = () => setRecState("tryagain");
+      rec.onend = () => setRecState(s => (s === "recording" ? "tryagain" : s));
+      rec.start();
+    } catch (e) { setRecState("tryagain"); }
+  }
+
+  if (!word) return null;
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="אוזן זהב" icon="🎧" onBack={onBack} progress={idx} total={items.length} />
+      {mode === "listen" ? (
+        <div key={word.id}>
+          <h2 className="text-lg font-bold text-slate-700 mb-4 text-center">איזו מילה שמעתם?</h2>
+          <button onClick={() => speak(word.en)}
+            className="mx-auto block text-5xl bg-white rounded-full w-24 h-24 shadow-lg mb-2 active:scale-95">🔊</button>
+          <button onClick={() => speak(word.en, 0.6)} className="mx-auto block text-xs text-indigo-500 font-semibold mb-6">🐢 לאט יותר</button>
+          <div className="space-y-3">
+            {options.map(o => (
+              <AnswerButton key={o} text={o} state={answerState[o] || "idle"} onClick={() => handleOption(o)} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="text-center slide-in">
+          <h2 className="text-lg font-bold text-slate-700 mb-2">עכשיו אתם! אמרו את המילה:</h2>
+          <div className="en text-4xl font-black text-slate-800 mb-1">{word.en}</div>
+          <div className="text-slate-400 text-sm mb-6">{word.he}</div>
+          {recState === "good" ? (
+            <div className="pop">
+              <div className="text-5xl mb-3">🌟</div>
+              <div className="text-emerald-600 font-bold text-xl mb-6">הגייה מצוינת!</div>
+              <BigButton onClick={next} color="bg-emerald-500">ממשיכים →</BigButton>
+            </div>
+          ) : (
+            <div>
+              <button onClick={startRecording} disabled={recState === "recording"}
+                className={`mx-auto block text-5xl rounded-full w-24 h-24 shadow-lg mb-4 active:scale-95 ${recState === "recording" ? "bg-rose-100 animate-pulse" : "bg-white"}`}>
+                🎤
+              </button>
+              <div className="text-slate-500 text-sm mb-6">
+                {recState === "recording" ? "מקשיבים... דברו עכשיו!" :
+                 recState === "tryagain" ? "כמעט! שמעו שוב ונסו עוד פעם 🙂" : "הקישו על המיקרופון ואמרו את המילה"}
+              </div>
+              {recState === "tryagain" && (
+                <button onClick={() => speak(word.en, 0.7)} className="text-indigo-500 text-sm font-semibold mb-4 block mx-auto">🔊 שמעו שוב</button>
+              )}
+              <button onClick={next} className="text-slate-400 text-sm font-semibold">דלגו לשאלה הבאה ←</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   מסך סיום פעילות
+   ============================================================ */
+
+function SessionDoneScreen({ domain, results, xp, onHome }) {
+  const correct = results.filter(Boolean).length;
+  const rate = results.length ? correct / results.length : 0;
+  const msg = rate >= 0.8 ? "וואו, ריסקתם את זה! 🤩" : rate >= 0.5 ? "עבודה יפה, מתקדמים! 💪" : "כל טעות מקרבת אתכם — כבוד על הניסיון! 🌱";
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen flex flex-col justify-center text-center">
+      <div className="text-6xl mb-4 pop">{rate >= 0.8 ? "🏅" : rate >= 0.5 ? "✨" : "🌱"}</div>
+      <h1 className="text-2xl font-black text-slate-800 mb-2">{msg}</h1>
+      <p className="text-slate-500 mb-1">{DOMAINS[domain].icon} {DOMAINS[domain].name}: {correct} מתוך {results.length} נכונות</p>
+      <p className="text-amber-500 font-black text-xl mb-8">+{xp} XP</p>
+      <BigButton onClick={onHome} color="bg-indigo-600">חזרה הביתה 🏠</BigButton>
+    </div>
+  );
+}
+
+/* ============================================================
+   הגדרות
+   ============================================================ */
+
+function SettingsScreen({ profile, onSave, onBack, onReset }) {
+  const [apiKey, setApiKey] = useState(profile.settings.apiKey);
+  const [soundOn, setSoundOn] = useState(profile.settings.sound);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="הגדרות" icon="⚙️" onBack={onBack} progress={0} total={0} />
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm mb-4">
+        <label className="font-bold text-slate-700 block mb-1">✨ מפתח Anthropic API (אופציונלי)</label>
+        <p className="text-xs text-slate-500 mb-3">
+          עם מפתח, האפליקציה תוכל ליצור תרגילים והסברים מותאמים אישית.
+          המפתח נשמר רק בדפדפן שלכם (localStorage) ולא נשלח לשום מקום חוץ מ-Anthropic.
+          בלי מפתח — הכל עובד עם מאגר התרגילים המובנה.
+        </p>
+        <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
+          placeholder="sk-ant-..." dir="ltr"
+          className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm en focus:border-indigo-400 outline-none" />
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm mb-4 flex items-center justify-between">
+        <div>
+          <div className="font-bold text-slate-700">🔔 צלילי פידבק</div>
+          <div className="text-xs text-slate-500">צליל קצר על כל תשובה</div>
+        </div>
+        <button onClick={() => setSoundOn(s => !s)}
+          className={`w-14 h-8 rounded-full transition-colors relative ${soundOn ? "bg-emerald-400" : "bg-slate-300"}`}>
+          <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-all ${soundOn ? "right-1" : "right-7"}`} />
+        </button>
+      </div>
+
+      <BigButton onClick={() => onSave({ apiKey: apiKey.trim(), sound: soundOn })} color="bg-indigo-600" className="mb-6">שמירה</BigButton>
+
+      <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5">
+        <div className="font-bold text-rose-700 mb-1">🗑️ אתחול פרופיל</div>
+        <p className="text-xs text-rose-600 mb-3">מוחק את כל ההתקדמות, הניקוד והאבחון — ומתחיל מההתחלה.</p>
+        {!confirmReset ? (
+          <button onClick={() => setConfirmReset(true)} className="text-rose-600 font-bold text-sm border-2 border-rose-300 rounded-xl px-4 py-2">אתחול פרופיל...</button>
+        ) : (
+          <div className="flex gap-3">
+            <button onClick={onReset} className="bg-rose-500 text-white font-bold text-sm rounded-xl px-4 py-2">כן, למחוק הכל</button>
+            <button onClick={() => setConfirmReset(false)} className="text-slate-500 font-bold text-sm px-4 py-2">ביטול</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   מסך פתיחה
+   ============================================================ */
+
+function WelcomeScreen({ onStart }) {
+  return (
+    <div className="max-w-lg mx-auto p-6 min-h-screen flex flex-col justify-center text-center">
+      <div className="text-7xl mb-4">🚀</div>
+      <h1 className="text-4xl font-black text-slate-800 mb-3">EnglishQuest</h1>
+      <p className="text-slate-600 text-lg leading-relaxed mb-2">לומדים אנגלית כמו משחק — בקצב שלך, בדרך שלך.</p>
+      <p className="text-slate-500 text-sm mb-8">נתחיל עם משחק היכרות קצר (בערך 3 דקות) כדי לבנות לך מסלול אישי. בלי ציונים, בלי לחץ. 😉</p>
+      <BigButton onClick={onStart} color="bg-gradient-to-l from-indigo-600 to-fuchsia-600">בואו נתחיל! 🎮</BigButton>
+    </div>
+  );
+}
+
+/* ============================================================
+   האפליקציה הראשית — ניווט ומצב
+   ============================================================ */
+
+function App() {
+  const [profile, setProfile] = useState(loadProfile);
+  const [screen, setScreen] = useState(() => (loadProfile().onboardingDone ? "home" : "welcome"));
+  const [sessionDone, setSessionDone] = useState(null); // { domain, results, xp }
+  const [isDailySession, setIsDailySession] = useState(false);
+  const [xpFloat, setXpFloat] = useState(0);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef(null);
+
+  // שמירה אוטומטית של כל שינוי בפרופיל
+  useEffect(() => { saveProfile(profile); }, [profile]);
+
+  function showToast(msg) {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  }
+
+  function handleDiagnosticComplete(scores, focusArea) {
+    setProfile(p => ({ ...p, scores, focusArea, onboardingDone: true }));
+    setScreen("playerCard");
+  }
+
+  function startActivity(activityId, isDaily) {
+    setIsDailySession(isDaily);
+    setScreen(activityId);
+  }
+
+  // סיום פעילות: עדכון פרופיל + מסך סיכום
+  function finishSession(domain, results, xp, srsUpdates) {
+    setProfile(p => {
+      let updated = applySessionToProfile(p, domain, results, xp, isDailySession);
+      if (srsUpdates) updated = { ...updated, srs: { ...updated.srs, ...srsUpdates } };
+      return updated;
+    });
+    setXpFloat(xp);
+    setTimeout(() => setXpFloat(0), 1100);
+    setSessionDone({ domain, results, xp });
+    setScreen("sessionDone");
+  }
+
+  function saveSettings(settings) {
+    setProfile(p => ({ ...p, settings }));
+    showToast("ההגדרות נשמרו ✅");
+    setScreen("home");
+  }
+
+  function resetProfile() {
+    localStorage.removeItem(STORAGE_KEY);
+    const fresh = { ...DEFAULT_PROFILE };
+    setProfile(fresh);
+    setScreen("welcome");
+  }
+
+  const common = { profile, onBack: () => setScreen("home"), onFinish: finishSession, showToast };
+
+  return (
+    <div className="min-h-screen">
+      {screen === "welcome" && <WelcomeScreen onStart={() => setScreen("diagnostic")} />}
+      {screen === "diagnostic" && <DiagnosticScreen onComplete={handleDiagnosticComplete} sound={profile.settings.sound} />}
+      {screen === "playerCard" && <PlayerCardScreen profile={profile} onContinue={() => setScreen("home")} />}
+      {screen === "home" && <HomeScreen profile={profile} onStart={startActivity} onSettings={() => setScreen("settings")} />}
+      {screen === "flashcards" && <FlashcardsActivity {...common} />}
+      {screen === "grammar" && <GrammarActivity {...common} />}
+      {screen === "reading" && <ReadingActivity {...common} />}
+      {screen === "sentence" && <SentenceActivity {...common} />}
+      {screen === "spelling" && <SpellingActivity {...common} />}
+      {screen === "listening" && <ListeningActivity {...common} />}
+      {screen === "sessionDone" && sessionDone && (
+        <SessionDoneScreen {...sessionDone} onHome={() => { setSessionDone(null); setScreen("home"); }} />
+      )}
+      {screen === "settings" && (
+        <SettingsScreen profile={profile} onSave={saveSettings} onBack={() => setScreen("home")} onReset={resetProfile} />
+      )}
+      <XpFloat amount={xpFloat} />
+      <Toast msg={toast} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
