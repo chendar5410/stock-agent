@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>MathQuest — מתמטיקה כמו משחק</title>
+<!-- React + Tailwind דרך CDN, ללא שלב build -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Heebo", Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+  .ltr { direction: ltr; unicode-bidi: isolate; }
+  @keyframes pop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+  .pop { animation: pop 0.35s ease-out; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  .shake { animation: shake 0.3s ease-in-out; }
+  @keyframes floatUp { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-60px); opacity: 0; } }
+  .float-up { animation: floatUp 1s ease-out forwards; }
+  @keyframes slideIn { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .slide-in { animation: slideIn 0.3s ease-out; }
+  .no-select { -webkit-user-select: none; user-select: none; }
+</style>
+</head>
+<body class="bg-slate-100">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// מספר גרסה — מוצג במסך כדי שיהיה קל לוודא שהעדכון האחרון הגיע
+const APP_VERSION = "1.0";
+
+/* ============================================================
+   תחומי הלימוד
+   ============================================================ */
+
+const DOMAINS = {
+  equations: { name:"משוואות בנעלם אחד", icon:"⚖️", color:"bg-indigo-500" },
+  fractions: { name:"משוואות עם שברים",  icon:"🍕", color:"bg-amber-500" },
+  signedAS:  { name:"חיבור וחיסור מכוונים", icon:"🌡️", color:"bg-sky-500" },
+  signedMD:  { name:"כפל וחילוק מכוונים",  icon:"✖️", color:"bg-rose-500" },
+};
+
+/* ============================================================
+   מחוללי תרגילים — כל תרגיל נוצר אקראית, אף פעם לא חוזר על עצמו
+   כל תרגיל: parts (תצוגה), answer, options, hint1/hint2 (הכוונה,
+   לא תשובה), explain (פתרון מלא לרגע של למידה)
+   ============================================================ */
+
+function ri(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function choice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
+function sgn(n) { return n < 0 ? `(${n})` : `${n}`; } // מספר שלילי בסוגריים
+
+// בונה 4 אפשרויות: התשובה + מסיחים של טעויות נפוצות (שלמים בלבד)
+function makeOptions(answer, candidates) {
+  const seen = new Set([answer]);
+  const out = [answer];
+  for (const c of candidates) {
+    if (Number.isInteger(c) && !seen.has(c)) { seen.add(c); out.push(c); }
+    if (out.length === 4) break;
+  }
+  let d = 1;
+  while (out.length < 4) {
+    const c = answer + d;
+    if (!seen.has(c)) { seen.add(c); out.push(c); }
+    d = d > 0 ? -d : -d + 1;
+  }
+  return shuffle(out);
+}
+
+let qSeq = 0;
+function qid() { return "q" + (++qSeq) + "-" + Date.now(); }
+
+// --- משוואות בנעלם אחד ---
+function genEquation(level) {
+  if (level === 1) {
+    const form = choice(["plus", "minus", "mul"]);
+    const x = ri(1, 12);
+    if (form === "mul") {
+      const a = ri(2, 9), b = a * x;
+      return { id: qid(), parts: [{ txt: `${a}x = ${b}` }], answer: x,
+        options: makeOptions(x, [b - a, x + 1, x - 1, a]),
+        hint1: "x מוכפל במספר — כדי לבודד אותו, חלקו את שני האגפים באותו מספר.",
+        hint2: `חלקו את שני האגפים ב-${a}: x = ${b} ÷ ${a}`,
+        explain: `מחלקים את שני האגפים ב-${a}: x = ${b} ÷ ${a} = ${x}` };
+    }
+    const a = ri(2, 12);
+    if (form === "plus") {
+      const b = x + a;
+      return { id: qid(), parts: [{ txt: `x + ${a} = ${b}` }], answer: x,
+        options: makeOptions(x, [b + a, x + 1, x - 1, -x]),
+        hint1: "כדי לבודד את x, העבירו את המספר לאגף השני — הוא מחליף סימן.",
+        hint2: `x = ${b} − ${a} — עכשיו חשבו.`,
+        explain: `מעבירים את ${a} אגף עם סימן הפוך: x = ${b} − ${a} = ${x}` };
+    }
+    const b = x - a;
+    return { id: qid(), parts: [{ txt: `x − ${a} = ${b}` }], answer: x,
+      options: makeOptions(x, [b - a, x + 1, x - 1, -x]),
+      hint1: "כדי לבודד את x, העבירו את המספר לאגף השני — הוא מחליף סימן.",
+      hint2: `x = ${b} + ${a} — עכשיו חשבו.`,
+      explain: `מעבירים את ${a} אגף עם סימן הפוך: x = ${b} + ${a} = ${x}` };
+  }
+  if (level === 2) {
+    const a = ri(2, 6), x = ri(1, 9), b = ri(2, 15);
+    if (choice([true, false])) {
+      const c = a * x + b;
+      return { id: qid(), parts: [{ txt: `${a}x + ${b} = ${c}` }], answer: x,
+        options: makeOptions(x, [x + 1, x - 1, (c + b) / a, c - b]),
+        hint1: "שני שלבים: קודם מעבירים את המספר הבודד אגף, ואז מחלקים במקדם של x.",
+        hint2: `אחרי העברת אגפים: ${a}x = ${a * x} — עכשיו חלקו ב-${a}.`,
+        explain: `${a}x = ${c} − ${b} = ${a * x}, ואז x = ${a * x} ÷ ${a} = ${x}` };
+    }
+    const c = a * x - b;
+    return { id: qid(), parts: [{ txt: `${a}x − ${b} = ${c}` }], answer: x,
+      options: makeOptions(x, [x + 1, x - 1, (c - b) / a, c + b]),
+      hint1: "שני שלבים: קודם מעבירים את המספר הבודד אגף, ואז מחלקים במקדם של x.",
+      hint2: `אחרי העברת אגפים: ${a}x = ${a * x} — עכשיו חלקו ב-${a}.`,
+      explain: `${a}x = ${c} + ${b} = ${a * x}, ואז x = ${a * x} ÷ ${a} = ${x}` };
+  }
+  // רמה 3: נעלם בשני האגפים, או סוגריים
+  if (choice([true, false])) {
+    const x = ri(1, 8), c = ri(1, 4), a = c + ri(1, 4), b = ri(1, 10);
+    const d = (a - c) * x + b;
+    return { id: qid(), parts: [{ txt: `${a}x + ${b} = ${c}x + ${d}` }], answer: x,
+      options: makeOptions(x, [x + 1, x - 1, -x, d - b]),
+      hint1: "אספו את כל ה-x באגף אחד ואת המספרים באגף השני (מי שעובר אגף מחליף סימן).",
+      hint2: `אחרי איסוף: ${a - c}x = ${d - b} — עכשיו חלקו.`,
+      explain: `${a}x − ${c}x = ${d} − ${b} ⟸ ${a - c}x = ${d - b} ⟸ x = ${x}` };
+  }
+  const a = ri(2, 5), x = ri(1, 8), b = ri(1, 6), c = a * (x + b);
+  return { id: qid(), parts: [{ txt: `${a}(x + ${b}) = ${c}` }], answer: x,
+    options: makeOptions(x, [x + 1, x - 1, c - b, (c - b) / a]),
+    hint1: "אפשר לפתוח סוגריים, או פשוט לחלק את שני האגפים במספר שמחוץ לסוגריים.",
+    hint2: `אחרי חלוקה ב-${a}: x + ${b} = ${c / a}`,
+    explain: `מחלקים ב-${a}: x + ${b} = ${c / a}, ואז x = ${c / a} − ${b} = ${x}` };
+}
+
+// --- משוואות עם שברים ---
+function genFraction(level) {
+  if (level === 1) {
+    const a = ri(2, 6), b = ri(2, 9), x = a * b;
+    return { id: qid(), parts: [{ frac: ["x", `${a}`] }, { txt: ` = ${b}` }], answer: x,
+      options: makeOptions(x, [b + a, Math.round(b / a), x + a, x - a]),
+      hint1: "x מחולק במספר — כדי לבטל את השבר, כפלו את שני האגפים במכנה.",
+      hint2: `x = ${b} × ${a} — עכשיו חשבו.`,
+      explain: `כופלים את שני האגפים ב-${a}: x = ${b} × ${a} = ${x}` };
+  }
+  if (level === 2) {
+    if (choice([true, false])) {
+      const a = ri(2, 5), b = ri(1, 8), q = ri(2, 8), c = q + b, x = a * q;
+      return { id: qid(), parts: [{ frac: ["x", `${a}`] }, { txt: ` + ${b} = ${c}` }], answer: x,
+        options: makeOptions(x, [a * c, q, x + a, x - a]),
+        hint1: "קודם העבירו את המספר הבודד אגף, ורק אז תטפלו בשבר.",
+        hint2: `אחרי העברת אגפים: x/${a} = ${q} — עכשיו כפלו במכנה.`,
+        explain: `x/${a} = ${c} − ${b} = ${q}, ואז x = ${q} × ${a} = ${x}` };
+    }
+    const a = ri(2, 5), b = ri(1, 9), c = ri(2, 7), x = a * c - b;
+    return { id: qid(), parts: [{ frac: [`x + ${b}`, `${a}`] }, { txt: ` = ${c}` }], answer: x,
+      options: makeOptions(x, [a * c + b, c - b, x + a, x - 1]),
+      hint1: "כל מה שלמעלה הוא חבילה אחת — כפלו את שני האגפים במכנה, ואז בודדו את x.",
+      hint2: `אחרי כפל במכנה: x + ${b} = ${a * c}`,
+      explain: `x + ${b} = ${c} × ${a} = ${a * c}, ואז x = ${a * c} − ${b} = ${x}` };
+  }
+  // רמה 3
+  if (choice([true, false])) {
+    const b = ri(2, 5); let a = ri(2, 5); if (a === b) a = b + 1;
+    const m = ri(2, 6), x = b * m, c = a * m;
+    return { id: qid(), parts: [{ frac: [`${a}x`, `${b}`] }, { txt: ` = ${c}` }], answer: x,
+      options: makeOptions(x, [c * b, m, x + b, x - b]),
+      hint1: "כפלו את שני האגפים במכנה כדי להעלים את השבר, ואז חלקו במקדם.",
+      hint2: `אחרי כפל ב-${b}: ${a}x = ${c * b} — עכשיו חלקו ב-${a}.`,
+      explain: `${a}x = ${c} × ${b} = ${c * b}, ואז x = ${c * b} ÷ ${a} = ${x}` };
+  }
+  const pairs = [[2, 3], [2, 4], [3, 4], [2, 5]];
+  const [a, b] = choice(pairs);
+  const k = ri(1, 4), L = a * b, x = L * k, c = (x / a) + (x / b);
+  return { id: qid(), parts: [{ frac: ["x", `${a}`] }, { txt: " + " }, { frac: ["x", `${b}`] }, { txt: ` = ${c}` }], answer: x,
+    options: makeOptions(x, [c, x + a, x - b, c * a]),
+    hint1: "כפלו את כל המשוואה במכנה המשותף של שני השברים — וכל השברים ייעלמו.",
+    hint2: `אחרי כפל ב-${L}: ${L / a}x + ${L / b}x = ${c * L}, כלומר ${L / a + L / b}x = ${c * L}`,
+    explain: `כופלים ב-${L}: ${L / a}x + ${L / b}x = ${c * L} ⟸ ${L / a + L / b}x = ${c * L} ⟸ x = ${x}` };
+}
+
+// --- חיבור וחיסור מספרים מכוונים ---
+function genSignedAS(level) {
+  if (level === 1) {
+    const a = -ri(2, 10), b = ri(2, 10), first = choice([true, false]);
+    const [p, q] = first ? [a, b] : [b, a];
+    const ans = p + q;
+    return { id: qid(), parts: [{ txt: `${sgn(p)} + ${sgn(q)} = ?` }], answer: ans,
+      options: makeOptions(ans, [-ans, Math.abs(p) + Math.abs(q), -(Math.abs(p) + Math.abs(q)), ans + 1]),
+      hint1: "דמיינו ציר מספרים: מתחילים במספר הראשון, פלוס = ימינה, מינוס = שמאלה.",
+      hint2: `בסימנים שונים: מחסרים את הערכים (${Math.max(Math.abs(p), Math.abs(q))} − ${Math.min(Math.abs(p), Math.abs(q))}) והסימן הוא של הגדול בערכו.`,
+      explain: `${sgn(p)} + ${sgn(q)}: סימנים שונים — מחסרים ערכים מוחלטים והסימן לפי הגדול: ${ans}` };
+  }
+  if (level === 2) {
+    if (choice([true, false])) {
+      const a = ri(2, 12), b = ri(2, 12), ans = a + b;
+      return { id: qid(), parts: [{ txt: `${a} − (${-b}) = ?` }], answer: ans,
+        options: makeOptions(ans, [a - b, b - a, -(a + b), ans - 1]),
+        hint1: "חיסור של מספר שלילי: שני המינוסים נפגשים והופכים לפלוס.",
+        hint2: `זה בעצם ${a} + ${b}.`,
+        explain: `${a} − (${-b}) = ${a} + ${b} = ${ans} (מינוס מינוס = פלוס)` };
+    }
+    const a = ri(2, 12), b = ri(2, 12), ans = -a - b;
+    return { id: qid(), parts: [{ txt: `${sgn(-a)} − ${b} = ?` }], answer: ans,
+      options: makeOptions(ans, [-a + b, a + b, b - a, ans + 1]),
+      hint1: "מתחילים במספר שלילי וממשיכים שמאלה על הציר — מתרחקים עוד מהאפס.",
+      hint2: `שני הצעדים שמאלה מצטברים: בדיוק כמו −(${a} + ${b}).`,
+      explain: `${sgn(-a)} − ${b}: שניהם בכיוון השלילי, מחברים ערכים ושמים מינוס: ${ans}` };
+  }
+  // רמה 3: שרשרת של שלושה איברים
+  const nums = [ri(-15, 15) || 3, ri(2, 15) * choice([1, -1]), ri(2, 15) * choice([1, -1])];
+  const [a, b, c] = nums;
+  const ans = a + b - c;
+  const txt = `${sgn(a)} + ${sgn(b)} − ${sgn(c)} = ?`;
+  return { id: qid(), parts: [{ txt }], answer: ans,
+    options: makeOptions(ans, [a + b + c, a - b - c, -ans, ans + 2]),
+    hint1: "פתרו משמאל לימין, שלב-שלב: קודם את שני הראשונים, ואז את התוצאה עם השלישי.",
+    hint2: `שלב ראשון: ${sgn(a)} + ${sgn(b)} = ${a + b}. עכשיו המשיכו.`,
+    explain: `${sgn(a)} + ${sgn(b)} = ${a + b}, ואז ${sgn(a + b)} − ${sgn(c)} = ${ans}` };
+}
+
+// --- כפל וחילוק מספרים מכוונים ---
+function genSignedMD(level) {
+  if (level === 1) {
+    const a = ri(2, 9), b = ri(2, 9), ans = -a * b;
+    const txt = choice([true, false]) ? `${sgn(-a)} × ${b} = ?` : `${a} × ${sgn(-b)} = ?`;
+    return { id: qid(), parts: [{ txt }], answer: ans,
+      options: makeOptions(ans, [a * b, -a - b, a + b, ans + a]),
+      hint1: "קודם כפלו את המספרים בלי הסימנים, ואז קבעו סימן: פלוס × מינוס = ?",
+      hint2: `${a} × ${b} = ${a * b} — סימנים שונים נותנים מינוס.`,
+      explain: `כופלים ערכים: ${a} × ${b} = ${a * b}. סימנים שונים ⟸ התוצאה שלילית: ${ans}` };
+  }
+  if (level === 2) {
+    if (choice([true, false])) {
+      const a = ri(2, 9), b = ri(2, 9), ans = a * b;
+      return { id: qid(), parts: [{ txt: `${sgn(-a)} × ${sgn(-b)} = ?` }], answer: ans,
+        options: makeOptions(ans, [-a * b, -a - b, a + b, ans - a]),
+        hint1: "כשכופלים שני מספרים עם אותו סימן — מה קורה לתוצאה?",
+        hint2: `מינוס × מינוס = פלוס. עכשיו רק ${a} × ${b}.`,
+        explain: `מינוס × מינוס = פלוס: ${a} × ${b} = ${ans}` };
+    }
+    const b = ri(2, 9), q = ri(2, 9), a = b * q, neg = choice(["a", "b"]);
+    const ans = -q;
+    const txt = neg === "a" ? `${sgn(-a)} ÷ ${b} = ?` : `${a} ÷ ${sgn(-b)} = ?`;
+    return { id: qid(), parts: [{ txt }], answer: ans,
+      options: makeOptions(ans, [q, -a - b, q + 1, ans - 1]),
+      hint1: "חילוק עובד כמו כפל: קודם חלקו את הערכים, ואז קבעו את הסימן.",
+      hint2: `${a} ÷ ${b} = ${q} — סימנים שונים נותנים מינוס.`,
+      explain: `${a} ÷ ${b} = ${q}, סימנים שונים ⟸ ${ans}` };
+  }
+  // רמה 3: שרשרת כפל וחילוק
+  const a = ri(2, 6), b = ri(2, 5), c = choice([a, b, 2]);
+  const s1 = choice([1, -1]), s2 = choice([1, -1]), s3 = choice([1, -1]);
+  const txt = `${sgn(s1 * a)} × ${sgn(s2 * b)} × ${sgn(s3 * c)} ÷ ${sgn(c)} = ?`;
+  const finalAns = s1 * s2 * s3 * a * b;
+  return { id: qid(), parts: [{ txt }], answer: finalAns,
+    options: makeOptions(finalAns, [-finalAns, a * b * c, -(a * b), finalAns + a]),
+    hint1: "ספרו כמה מינוסים יש בתרגיל: מספר זוגי ⟸ פלוס, מספר אי-זוגי ⟸ מינוס.",
+    hint2: `הערכים: ${a} × ${b} × ${c} ÷ ${c} = ${a * b}. עכשיו רק קבעו את הסימן.`,
+    explain: `ערכים: ${a * b}. מספר המינוסים קובע את הסימן ⟸ ${finalAns}` };
+}
+
+const GENERATORS = { equations: genEquation, fractions: genFraction, signedAS: genSignedAS, signedMD: genSignedMD };
+
+/* ============================================================
+   שמירת מצב — localStorage
+   ============================================================ */
+
+const STORAGE_KEY = "mathQuest_v1";
+
+const DEFAULT_PROFILE = {
+  onboardingDone: false,
+  scores: { equations: 3, fractions: 3, signedAS: 3, signedMD: 3 },
+  focusArea: null,
+  xp: 0,
+  streak: 0,
+  lastActiveDate: null,
+  dailyDoneDate: null,
+  settings: { apiKey: "", sound: true },
+};
+
+function loadProfile() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_PROFILE };
+    const saved = JSON.parse(raw);
+    return { ...DEFAULT_PROFILE, ...saved,
+      scores: { ...DEFAULT_PROFILE.scores, ...(saved.scores || {}) },
+      settings: { ...DEFAULT_PROFILE.settings, ...(saved.settings || {}) } };
+  } catch (e) { return { ...DEFAULT_PROFILE }; }
+}
+
+function saveProfile(p) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch (e) {} }
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function yesterdayStr() { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+function levelFromXp(xp) { return Math.floor(Math.sqrt(xp / 60)) + 1; }
+function xpForLevel(lv) { return Math.pow(lv - 1, 2) * 60; }
+
+/* ============================================================
+   צליל
+   ============================================================ */
+
+let audioCtx = null;
+function playTone(good, enabled) {
+  if (!enabled) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    const freqs = good ? [523, 659, 784] : [330, 247];
+    freqs.forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = f; o.type = "sine";
+      g.gain.setValueAtTime(0.12, now + i * 0.09);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.09 + 0.25);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(now + i * 0.09); o.stop(now + i * 0.09 + 0.3);
+    });
+  } catch (e) {}
+}
+
+/* ============================================================
+   שכבת AI אופציונלית — הסבר מותאם אישית על טעות
+   כישלון ב-API לעולם לא שובר את האפליקציה
+   ============================================================ */
+
+async function aiExplainMistake(apiKey, questionText, wrongAnswer, correctAnswer) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      // הכרחי לקריאות ישירות מהדפדפן (CORS)
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-opus-4-8",
+      max_tokens: 600,
+      system: "You are a friendly math tutor for Hebrew-speaking 7th graders. Answer in simple Hebrew, 2-3 sentences, encouraging, never judgmental. Identify the likely mistake the student made and explain the right way.",
+      messages: [{ role: "user", content: `Exercise: ${questionText}. The student answered ${wrongAnswer}, the correct answer is ${correctAnswer}. Explain in Hebrew what probably went wrong and the rule.` }],
+    }),
+  });
+  if (!res.ok) throw new Error("API error " + res.status);
+  const data = await res.json();
+  if (data.stop_reason === "refusal" || !data.content || !data.content.length) throw new Error("empty");
+  const block = data.content.find(b => b.type === "text");
+  if (!block) throw new Error("no text");
+  return block.text;
+}
+
+/* ============================================================
+   רכיבי UI
+   ============================================================ */
+
+function ProgressBar({ value, max, color }) {
+  return (
+    <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+      <div className={`h-full rounded-full transition-all duration-500 ${color || "bg-indigo-500"}`}
+           style={{ width: Math.min(100, (value / max) * 100) + "%" }} />
+    </div>
+  );
+}
+
+function BigButton({ onClick, children, color, disabled, className }) {
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className={`w-full py-4 px-6 rounded-2xl text-lg font-bold text-white shadow-lg active:scale-95 transition-transform disabled:opacity-40 ${color || "bg-indigo-600"} ${className || ""}`}>
+      {children}
+    </button>
+  );
+}
+
+function AnswerButton({ text, state, onClick }) {
+  const base = "w-full py-3.5 px-4 rounded-xl text-xl font-bold border-2 transition-all active:scale-95 no-select ltr";
+  const styles = {
+    idle:    "bg-white border-slate-200 text-slate-800 hover:border-indigo-300",
+    correct: "bg-emerald-100 border-emerald-500 text-emerald-800 pop",
+    wrong:   "bg-rose-100 border-rose-400 text-rose-700 shake",
+    dim:     "bg-white border-slate-100 text-slate-400",
+    reveal:  "bg-emerald-50 border-emerald-400 text-emerald-700",
+  };
+  return <button onClick={onClick} disabled={state !== "idle"} className={`${base} ${styles[state]}`}>{text}</button>;
+}
+
+// תצוגת תרגיל: טקסט + שברים אמיתיים (מונה מעל מכנה)
+function EqDisplay({ parts }) {
+  return (
+    <div className="ltr text-3xl font-black text-center bg-white rounded-2xl py-7 px-4 shadow-sm border border-slate-100 flex items-center justify-center flex-wrap gap-1">
+      {parts.map((p, i) => p.frac ? (
+        <span key={i} className="inline-flex flex-col items-center align-middle mx-1">
+          <span className="border-b-[3px] border-slate-700 px-2 leading-tight">{p.frac[0]}</span>
+          <span className="px-2 leading-tight">{p.frac[1]}</span>
+        </span>
+      ) : (
+        <span key={i}>{p.txt}</span>
+      ))}
+    </div>
+  );
+}
+
+function partsToText(parts) {
+  return parts.map(p => p.frac ? `(${p.frac[0]})/(${p.frac[1]})` : p.txt).join("");
+}
+
+function XpFloat({ amount }) {
+  if (!amount) return null;
+  return <div className="fixed top-24 left-1/2 -translate-x-1/2 text-2xl font-black text-amber-500 float-up pointer-events-none z-50">+{amount} XP</div>;
+}
+
+function Toast({ msg }) {
+  if (!msg) return null;
+  return <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-sm px-5 py-3 rounded-full shadow-xl z-50 slide-in">{msg}</div>;
+}
+
+function ActivityHeader({ title, icon, onBack, progress, total }) {
+  return (
+    <div className="mb-5">
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={onBack} className="text-slate-500 text-sm font-semibold py-2 px-3 rounded-lg bg-white shadow-sm">→ חזרה</button>
+        <div className="text-lg font-bold text-slate-700">{icon} {title}</div>
+      </div>
+      {total > 0 && <ProgressBar value={progress} max={total} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   רכיב שאלה אחת: תרגיל + אפשרויות + רמזים מדורגים + הסבר בטעות
+   משמש גם באבחון וגם בתרגול
+   ============================================================ */
+
+function QuestionCard({ question, onAnswered, sound, showExplain, apiKey, showToast }) {
+  const [answerState, setAnswerState] = useState({});
+  const [locked, setLocked] = useState(false);
+  const [hintLevel, setHintLevel] = useState(0);
+  const [explainText, setExplainText] = useState(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [wrongPick, setWrongPick] = useState(null);
+
+  function handleOption(opt) {
+    if (locked) return;
+    setLocked(true);
+    const correct = opt === question.answer;
+    const st = {};
+    question.options.forEach(o => {
+      st[o] = o === opt ? (correct ? "correct" : "wrong") : (o === question.answer && !correct ? "reveal" : "dim");
+    });
+    setAnswerState(st);
+    playTone(correct, sound);
+    if (!correct && showExplain) {
+      setWrongPick(opt);
+      setExplainText(question.explain);
+    } else {
+      setTimeout(() => onAnswered(correct), correct ? 800 : 1400);
+    }
+  }
+
+  async function askAi() {
+    setAiBusy(true);
+    try {
+      const text = await aiExplainMistake(apiKey, partsToText(question.parts), wrongPick, question.answer);
+      setExplainText(text);
+    } catch (e) { showToast("ה-AI לא זמין כרגע — ההסבר המובנה עדיין כאן 🙂"); }
+    setAiBusy(false);
+  }
+
+  return (
+    <div key={question.id}>
+      <EqDisplay parts={question.parts} />
+      <div className="grid grid-cols-2 gap-3 mt-5">
+        {question.options.map(o => (
+          <AnswerButton key={o} text={`${o}`} state={answerState[o] || "idle"} onClick={() => handleOption(o)} />
+        ))}
+      </div>
+
+      {/* רמזים מדורגים — הכוונה, לא תשובה */}
+      {!locked && (
+        <div className="text-center mt-4">
+          {hintLevel < 2 && (
+            <button onClick={() => setHintLevel(h => h + 1)}
+              className="text-sm font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-4 py-2 active:scale-95">
+              {hintLevel === 0 ? "💡 רמז" : "💡 עוד רמז"}
+            </button>
+          )}
+          {hintLevel > 0 && (
+            <div className="mt-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 slide-in leading-relaxed">
+              {hintLevel === 1 ? question.hint1 : question.hint2}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* רגע של למידה אחרי טעות */}
+      {explainText && (
+        <div className="mt-5 bg-sky-50 border border-sky-200 rounded-2xl p-4 slide-in">
+          <div className="font-bold text-sky-700 mb-1">💡 רגע של למידה</div>
+          <p className="text-slate-700 text-sm leading-relaxed">{explainText}</p>
+          {apiKey && (
+            <button onClick={askAi} disabled={aiBusy} className="text-indigo-500 text-xs font-semibold mt-2">
+              {aiBusy ? "חושב..." : "✨ הסבר מותאם אישית (AI)"}
+            </button>
+          )}
+          <div className="mt-3"><BigButton onClick={() => onAnswered(false)} color="bg-sky-500">הבנתי, ממשיכים →</BigButton></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   שלב 1 — שאלון אבחון אדפטיבי
+   ============================================================ */
+
+const DIAG_SEQUENCE = ["equations","equations","fractions","fractions","signedAS","signedAS","signedMD","signedMD","confidence"];
+
+const CONFIDENCE_OPTIONS = [
+  { id:"equations", label:"משוואות ארוכות ומסובכות" },
+  { id:"fractions", label:"שברים — פשוט שברים 😩" },
+  { id:"signed",    label:"מספרים שליליים מבלבלים אותי" },
+  { id:"speed",     label:"אני מבין אבל איטי בחישובים" },
+  { id:"word",      label:"בעיות מילוליות" },
+  { id:"ok",        label:"בעצם... די בסדר לי 😎" },
+];
+
+function computeScores(answers) {
+  const scores = {};
+  Object.keys(DOMAINS).forEach(domain => {
+    const rel = answers.filter(a => a.domain === domain);
+    if (!rel.length) { scores[domain] = 3; return; }
+    const avg = rel.reduce((s, a) => s + (a.correct ? a.difficulty + 2 : a.difficulty - 1), 0) / rel.length;
+    scores[domain] = Math.max(1, Math.min(5, Math.round(avg)));
+  });
+  return scores;
+}
+
+function DiagnosticScreen({ onComplete, sound }) {
+  const [step, setStep] = useState(0);
+  const [difficulty, setDifficulty] = useState({ equations: 2, fractions: 2, signedAS: 2, signedMD: 2 });
+  const answersRef = useRef([]);
+  const [question, setQuestion] = useState(null);
+
+  const total = DIAG_SEQUENCE.length;
+  const domain = DIAG_SEQUENCE[step];
+
+  useEffect(() => {
+    if (domain && domain !== "confidence") {
+      setQuestion(GENERATORS[domain](difficulty[domain]));
+    }
+  }, [step]);
+
+  function onAnswered(correct) {
+    const d = difficulty[domain];
+    answersRef.current = [...answersRef.current, { domain, difficulty: d, correct }];
+    // אדפטיבי: צדק — מקשים, טעה — מקלים. בלי עונשים.
+    setDifficulty(prev => ({ ...prev, [domain]: correct ? Math.min(3, d + 1) : Math.max(1, d - 1) }));
+    setStep(s => s + 1);
+  }
+
+  function handleConfidence(opt) {
+    onComplete(computeScores(answersRef.current), opt.id);
+  }
+
+  if (step >= total) return null;
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen flex flex-col">
+      <div className="mb-6 mt-2">
+        <div className="flex justify-between text-sm text-slate-500 mb-2">
+          <span>שאלה {step + 1} מתוך {total}</span>
+          <span>🕹️ משחק היכרות</span>
+        </div>
+        <ProgressBar value={step} max={total} color="bg-gradient-to-l from-indigo-500 to-fuchsia-500" />
+      </div>
+
+      {domain === "confidence" ? (
+        <div className="slide-in">
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">שאלה אחרונה 💬</h2>
+          <p className="text-slate-600 mb-6">מה הכי מאתגר אותך במתמטיקה? (אין תשובה לא נכונה)</p>
+          <div className="space-y-3">
+            {CONFIDENCE_OPTIONS.map(o => (
+              <button key={o.id} onClick={() => handleConfidence(o)}
+                className="w-full py-3.5 px-4 rounded-xl text-lg font-semibold border-2 bg-white border-slate-200 text-slate-800 active:scale-95 no-select">
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : question ? (
+        <div className="slide-in" key={question.id}>
+          <div className="text-sm font-bold text-indigo-500 mb-1">{DOMAINS[domain].icon} {DOMAINS[domain].name}</div>
+          <h2 className="text-xl font-bold text-slate-800 mb-4">{domain.startsWith("signed") ? "כמה זה?" : "מה הערך של x?"}</h2>
+          <QuestionCard question={question} onAnswered={onAnswered} sound={sound} showExplain={false} />
+          <p className="text-center text-xs text-slate-400 mt-6">אין נקודות ואין ציונים כאן — רק לומדים להכיר אותך 🙂</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
+   שלב 2 — כרטיס שחקן
+   ============================================================ */
+
+function PlayerCardScreen({ profile, onContinue }) {
+  const entries = Object.entries(profile.scores);
+  const sorted = [...entries].sort((a, b) => b[1] - a[1]);
+  const strongest = sorted[0], weakest = sorted[sorted.length - 1];
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen flex flex-col justify-center">
+      <div className="bg-gradient-to-br from-indigo-600 to-fuchsia-600 rounded-3xl p-6 text-white shadow-2xl slide-in">
+        <div className="text-center mb-5">
+          <div className="text-5xl mb-2">🎮</div>
+          <h1 className="text-2xl font-black">כרטיס השחקן שלך</h1>
+          <p className="text-indigo-200 text-sm mt-1">הנה מה שגילינו — בלי ציונים, רק נקודת פתיחה</p>
+        </div>
+        <div className="space-y-3 mb-5">
+          {entries.map(([key, score]) => (
+            <div key={key} className="flex items-center gap-3">
+              <span className="w-36 text-sm font-semibold">{DOMAINS[key].icon} {DOMAINS[key].name}</span>
+              <div className="flex-1 h-3 bg-white/20 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-300 rounded-full transition-all duration-700" style={{ width: (score / 5) * 100 + "%" }} />
+              </div>
+              <span className="text-xs w-10 text-left">{"⭐".repeat(Math.max(1, Math.round(score / 2)))}</span>
+            </div>
+          ))}
+        </div>
+        <div className="bg-white/15 rounded-2xl p-4 text-sm leading-relaxed">
+          <p>💪 <b>חזק אצלך:</b> {DOMAINS[strongest[0]].name} — כל הכבוד!</p>
+          <p className="mt-1">🎯 <b>נעבוד יחד על:</b> {DOMAINS[weakest[0]].name} — צעד-צעד, בקצב שלך.</p>
+          {profile.focusArea === "ok" && <p className="mt-1">😎 ואמרת שדי בסדר לך — אז נרים את הרף!</p>}
+        </div>
+      </div>
+      <div className="mt-6">
+        <BigButton onClick={onContinue} color="bg-emerald-500">יאללה, מתחילים! 🚀</BigButton>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   שלב 3 — מסך הבית והמסלול האישי
+   ============================================================ */
+
+function recommendedDomain(profile) {
+  const entries = Object.entries(profile.scores).sort((a, b) => a[1] - b[1]);
+  return (Math.random() < 0.7 ? entries[0] : entries[1])[0];
+}
+
+function HomeScreen({ profile, onStart, onSettings }) {
+  const level = levelFromXp(profile.xp);
+  const nextLevelXp = xpForLevel(level + 1);
+  const prevLevelXp = xpForLevel(level);
+  const dailyDone = profile.dailyDoneDate === todayStr();
+  const recDomain = recommendedDomain(profile);
+
+  const activities = [
+    { id:"equations", name:"מאזני המשוואות", desc:"בנעלם אחד, שלב-שלב" },
+    { id:"fractions", name:"שובר השברים",    desc:"משוואות עם שברים" },
+    { id:"signedAS",  name:"מסע על הציר",    desc:"חיבור וחיסור מכוונים" },
+    { id:"signedMD",  name:"חוקי הסימנים",   desc:"כפל וחילוק מכוונים" },
+  ];
+
+  return (
+    <div className="max-w-lg mx-auto p-5 pb-10">
+      <div className="flex items-center justify-between mt-2 mb-5">
+        <h1 className="text-2xl font-black text-slate-800">MathQuest <span className="text-xs font-normal text-slate-400">v{APP_VERSION}</span></h1>
+        <button onClick={onSettings} className="text-2xl p-2 bg-white rounded-xl shadow-sm">⚙️</button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
+          <div className="text-3xl">{profile.streak > 0 ? "🔥" : "❄️"}</div>
+          <div className="text-2xl font-black text-slate-800">{profile.streak}</div>
+          <div className="text-xs text-slate-500">ימים ברצף</div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
+          <div className="text-3xl">🏆</div>
+          <div className="text-2xl font-black text-slate-800">רמה {level}</div>
+          <div className="mt-1"><ProgressBar value={profile.xp - prevLevelXp} max={nextLevelXp - prevLevelXp} color="bg-amber-400" /></div>
+          <div className="text-xs text-slate-500 mt-1">{profile.xp} XP</div>
+        </div>
+      </div>
+
+      <div className={`rounded-2xl p-4 mb-5 shadow-sm ${dailyDone ? "bg-emerald-50 border border-emerald-200" : "bg-amber-50 border border-amber-200"}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-bold text-slate-800">{dailyDone ? "✅ המשימה היומית הושלמה!" : "⚡ משימת 3 דקות להיום"}</div>
+            <div className="text-sm text-slate-600">{dailyDone ? "חוזרים מחר לשמור על הרצף 🔥" : "סבב קצר אחד בתחום שכדאי לחזק"}</div>
+          </div>
+          {!dailyDone && (
+            <button onClick={() => onStart(recDomain, true)}
+              className="bg-amber-400 text-amber-900 font-bold px-4 py-2 rounded-xl shadow active:scale-95">קדימה</button>
+          )}
+        </div>
+      </div>
+
+      <BigButton onClick={() => onStart(recDomain, false)}
+        color="bg-gradient-to-l from-indigo-600 to-fuchsia-600" className="mb-4">
+        ▶️ המשך ללמוד — {DOMAINS[recDomain].name}
+      </BigButton>
+
+      <BigButton onClick={() => onStart("marathon", false)} color="bg-slate-700" className="mb-6">
+        🏃 מרתון מעורב — קצת מהכל
+      </BigButton>
+
+      <h2 className="font-bold text-slate-700 mb-3">או בחרו אתגר:</h2>
+      <div className="grid grid-cols-2 gap-3">
+        {activities.map(a => (
+          <button key={a.id} onClick={() => onStart(a.id, false)}
+            className="bg-white rounded-2xl p-4 shadow-sm text-right active:scale-95 transition-transform">
+            <div className={`w-10 h-10 rounded-xl ${DOMAINS[a.id].color} text-white text-xl flex items-center justify-center mb-2`}>{DOMAINS[a.id].icon}</div>
+            <div className="font-bold text-slate-800 text-sm">{a.name}</div>
+            <div className="text-xs text-slate-500">{a.desc}</div>
+            <div className="text-[10px] text-slate-400 mt-1">רמה {profile.scores[a.id]}/5</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   פעילות תרגול — קושי דינמי בזמן אמת
+   ============================================================ */
+
+function dynamicLevel(baseScore, sessionResults) {
+  let base = Math.max(1, Math.min(3, Math.ceil(baseScore / 2)));
+  const recent = sessionResults.slice(-3);
+  if (recent.length >= 2) {
+    if (recent.every(r => r)) base = Math.min(3, base + 1);
+    else if (recent.every(r => !r)) base = Math.max(1, base - 1);
+  }
+  return base;
+}
+
+function applySessionToProfile(profile, domain, results, xpGained, isDaily) {
+  const p = { ...profile };
+  p.xp += xpGained;
+  if (domain && p.scores[domain] !== undefined) {
+    const rate = results.length ? results.filter(Boolean).length / results.length : 0.5;
+    const cur = p.scores[domain];
+    if (rate >= 0.8 && results.length >= 4) p.scores = { ...p.scores, [domain]: Math.min(5, cur + 1) };
+    else if (rate <= 0.3 && results.length >= 4) p.scores = { ...p.scores, [domain]: Math.max(1, cur - 1) };
+  }
+  const today = todayStr();
+  if (p.lastActiveDate !== today) {
+    p.streak = p.lastActiveDate === yesterdayStr() ? p.streak + 1 : 1;
+    p.lastActiveDate = today;
+  }
+  if (isDaily) p.dailyDoneDate = today;
+  return p;
+}
+
+function PracticeActivity({ profile, domain, onFinish, onBack, showToast }) {
+  const SESSION_SIZE = 6;
+  const isMarathon = domain === "marathon";
+  const [count, setCount] = useState(0);
+  const resultsRef = useRef([]);
+  const [question, setQuestion] = useState(() => makeQuestion([]));
+
+  function makeQuestion(results) {
+    let dom = domain;
+    if (isMarathon) {
+      // במרתון: הגרלה עם עדיפות לתחומים חלשים
+      const entries = Object.entries(profile.scores);
+      const weights = entries.map(([k, s]) => ({ k, w: 6 - s }));
+      const total = weights.reduce((s, x) => s + x.w, 0);
+      let r = Math.random() * total;
+      dom = entries[0][0];
+      for (const x of weights) { r -= x.w; if (r <= 0) { dom = x.k; break; } }
+    }
+    const lvl = dynamicLevel(profile.scores[dom], results);
+    const q = GENERATORS[dom](lvl);
+    q.domain = dom;
+    return q;
+  }
+
+  function onAnswered(correct) {
+    resultsRef.current = [...resultsRef.current, correct];
+    const n = count + 1;
+    if (n >= SESSION_SIZE) {
+      const all = resultsRef.current;
+      const xp = all.filter(Boolean).length * 12 + 5;
+      onFinish(isMarathon ? null : domain, all, xp);
+    } else {
+      setCount(n);
+      setQuestion(makeQuestion(resultsRef.current));
+    }
+  }
+
+  const meta = isMarathon ? { name: "מרתון מעורב", icon: "🏃" } : DOMAINS[domain];
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title={meta.name} icon={meta.icon} onBack={onBack} progress={count} total={SESSION_SIZE} />
+      {isMarathon && <div className="text-sm font-bold text-indigo-500 mb-1">{DOMAINS[question.domain].icon} {DOMAINS[question.domain].name}</div>}
+      <h2 className="text-lg font-bold text-slate-700 mb-4">{question.domain && question.domain.startsWith("signed") ? "כמה זה?" : "מה הערך של x?"}</h2>
+      <QuestionCard key={question.id} question={question} onAnswered={onAnswered}
+        sound={profile.settings.sound} showExplain apiKey={profile.settings.apiKey} showToast={showToast} />
+    </div>
+  );
+}
+
+/* ============================================================
+   מסך סיום, הגדרות, פתיחה
+   ============================================================ */
+
+function SessionDoneScreen({ domain, results, xp, onHome }) {
+  const correct = results.filter(Boolean).length;
+  const rate = results.length ? correct / results.length : 0;
+  const msg = rate >= 0.8 ? "וואו, ריסקתם את זה! 🤩" : rate >= 0.5 ? "עבודה יפה, מתקדמים! 💪" : "כל טעות מקרבת אתכם — כבוד על הניסיון! 🌱";
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen flex flex-col justify-center text-center">
+      <div className="text-6xl mb-4 pop">{rate >= 0.8 ? "🏅" : rate >= 0.5 ? "✨" : "🌱"}</div>
+      <h1 className="text-2xl font-black text-slate-800 mb-2">{msg}</h1>
+      <p className="text-slate-500 mb-1">{domain ? `${DOMAINS[domain].icon} ${DOMAINS[domain].name}: ` : "🏃 מרתון מעורב: "}{correct} מתוך {results.length} נכונות</p>
+      <p className="text-amber-500 font-black text-xl mb-8">+{xp} XP</p>
+      <BigButton onClick={onHome} color="bg-indigo-600">חזרה הביתה 🏠</BigButton>
+    </div>
+  );
+}
+
+function SettingsScreen({ profile, onSave, onBack, onReset }) {
+  const [apiKey, setApiKey] = useState(profile.settings.apiKey);
+  const [soundOn, setSoundOn] = useState(profile.settings.sound);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  return (
+    <div className="max-w-lg mx-auto p-5 min-h-screen">
+      <ActivityHeader title="הגדרות" icon="⚙️" onBack={onBack} progress={0} total={0} />
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm mb-4">
+        <label className="font-bold text-slate-700 block mb-1">✨ מפתח Anthropic API (אופציונלי)</label>
+        <p className="text-xs text-slate-500 mb-3">
+          עם מפתח, תקבלו הסברים מותאמים אישית כשטועים. המפתח נשמר רק בדפדפן שלכם
+          (localStorage). בלי מפתח — הכל עובד רגיל עם ההסברים המובנים.
+        </p>
+        <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
+          placeholder="sk-ant-..." dir="ltr"
+          className="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm ltr focus:border-indigo-400 outline-none" />
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm mb-4 flex items-center justify-between">
+        <div>
+          <div className="font-bold text-slate-700">🔔 צלילי פידבק</div>
+          <div className="text-xs text-slate-500">צליל קצר על כל תשובה</div>
+        </div>
+        <button onClick={() => setSoundOn(s => !s)}
+          className={`w-14 h-8 rounded-full transition-colors relative ${soundOn ? "bg-emerald-400" : "bg-slate-300"}`}>
+          <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-all ${soundOn ? "right-1" : "right-7"}`} />
+        </button>
+      </div>
+
+      <BigButton onClick={() => onSave({ apiKey: apiKey.trim(), sound: soundOn })} color="bg-indigo-600" className="mb-6">שמירה</BigButton>
+
+      <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5">
+        <div className="font-bold text-rose-700 mb-1">🗑️ אתחול פרופיל</div>
+        <p className="text-xs text-rose-600 mb-3">מוחק את כל ההתקדמות והאבחון — ומתחיל מההתחלה.</p>
+        {!confirmReset ? (
+          <button onClick={() => setConfirmReset(true)} className="text-rose-600 font-bold text-sm border-2 border-rose-300 rounded-xl px-4 py-2">אתחול פרופיל...</button>
+        ) : (
+          <div className="flex gap-3">
+            <button onClick={onReset} className="bg-rose-500 text-white font-bold text-sm rounded-xl px-4 py-2">כן, למחוק הכל</button>
+            <button onClick={() => setConfirmReset(false)} className="text-slate-500 font-bold text-sm px-4 py-2">ביטול</button>
+          </div>
+        )}
+      </div>
+      <p className="text-center text-slate-300 text-xs mt-6">MathQuest גרסה {APP_VERSION}</p>
+    </div>
+  );
+}
+
+function WelcomeScreen({ onStart }) {
+  return (
+    <div className="max-w-lg mx-auto p-6 min-h-screen flex flex-col justify-center text-center">
+      <div className="text-7xl mb-4">🧮</div>
+      <h1 className="text-4xl font-black text-slate-800 mb-3">MathQuest</h1>
+      <p className="text-slate-600 text-lg leading-relaxed mb-2">מתמטיקה כמו משחק — משוואות, שברים ומספרים מכוונים, בקצב שלך.</p>
+      <p className="text-slate-500 text-sm mb-8">נתחיל עם משחק היכרות קצר (בערך 3 דקות) כדי לבנות לך מסלול אישי. בלי ציונים, בלי לחץ. 😉</p>
+      <BigButton onClick={onStart} color="bg-gradient-to-l from-indigo-600 to-fuchsia-600">בואו נתחיל! 🎮</BigButton>
+      <p className="text-slate-300 text-xs mt-6">גרסה {APP_VERSION}</p>
+    </div>
+  );
+}
+
+/* ============================================================
+   האפליקציה הראשית
+   ============================================================ */
+
+function App() {
+  const [profile, setProfile] = useState(loadProfile);
+  const [screen, setScreen] = useState(() => (loadProfile().onboardingDone ? "home" : "welcome"));
+  const [activityDomain, setActivityDomain] = useState(null);
+  const [sessionDone, setSessionDone] = useState(null);
+  const [isDailySession, setIsDailySession] = useState(false);
+  const [xpFloat, setXpFloat] = useState(0);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef(null);
+
+  useEffect(() => { saveProfile(profile); }, [profile]);
+
+  function showToast(msg) {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  }
+
+  function handleDiagnosticComplete(scores, focusArea) {
+    setProfile(p => ({ ...p, scores, focusArea, onboardingDone: true }));
+    setScreen("playerCard");
+  }
+
+  function startActivity(domain, isDaily) {
+    setActivityDomain(domain);
+    setIsDailySession(isDaily);
+    setScreen("practice");
+  }
+
+  function finishSession(domain, results, xp) {
+    setProfile(p => applySessionToProfile(p, domain, results, xp, isDailySession));
+    setXpFloat(xp);
+    setTimeout(() => setXpFloat(0), 1100);
+    setSessionDone({ domain, results, xp });
+    setScreen("sessionDone");
+  }
+
+  function saveSettings(settings) {
+    setProfile(p => ({ ...p, settings }));
+    showToast("ההגדרות נשמרו ✅");
+    setScreen("home");
+  }
+
+  function resetProfile() {
+    localStorage.removeItem(STORAGE_KEY);
+    setProfile({ ...DEFAULT_PROFILE });
+    setScreen("welcome");
+  }
+
+  return (
+    <div className="min-h-screen">
+      {screen === "welcome" && <WelcomeScreen onStart={() => setScreen("diagnostic")} />}
+      {screen === "diagnostic" && <DiagnosticScreen onComplete={handleDiagnosticComplete} sound={profile.settings.sound} />}
+      {screen === "playerCard" && <PlayerCardScreen profile={profile} onContinue={() => setScreen("home")} />}
+      {screen === "home" && <HomeScreen profile={profile} onStart={startActivity} onSettings={() => setScreen("settings")} />}
+      {screen === "practice" && activityDomain && (
+        <PracticeActivity profile={profile} domain={activityDomain} onFinish={finishSession}
+          onBack={() => setScreen("home")} showToast={showToast} />
+      )}
+      {screen === "sessionDone" && sessionDone && (
+        <SessionDoneScreen {...sessionDone} onHome={() => { setSessionDone(null); setScreen("home"); }} />
+      )}
+      {screen === "settings" && (
+        <SettingsScreen profile={profile} onSave={saveSettings} onBack={() => setScreen("home")} onReset={resetProfile} />
+      )}
+      <XpFloat amount={xpFloat} />
+      <Toast msg={toast} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
