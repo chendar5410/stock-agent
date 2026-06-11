@@ -124,20 +124,47 @@ const READING = [
   },
 ];
 
-// בניית משפט: מילים מעורבבות + תרגום עזר
+// בניית משפט: מילים מעורבבות + תרגום עזר + tip (רמז מכוון, לא תשובה)
 const SENTENCES = [
-  { id:"s1",  answer:"I like pizza", he:"אני אוהב פיצה", level:1 },
-  { id:"s2",  answer:"The dog is big", he:"הכלב גדול", level:1 },
-  { id:"s3",  answer:"She has a cat", he:"יש לה חתול", level:1 },
-  { id:"s4",  answer:"We are good friends", he:"אנחנו חברים טובים", level:1 },
-  { id:"s5",  answer:"He plays soccer every day", he:"הוא משחק כדורגל כל יום", level:2 },
-  { id:"s6",  answer:"We went to the beach yesterday", he:"הלכנו לים אתמול", level:2 },
-  { id:"s7",  answer:"Can I have some water please", he:"אפשר קצת מים בבקשה?", level:2 },
-  { id:"s8",  answer:"He does not like cold weather", he:"הוא לא אוהב מזג אוויר קר", level:2 },
-  { id:"s9",  answer:"I have been learning English for three years", he:"אני לומד אנגלית כבר שלוש שנים", level:3 },
-  { id:"s10", answer:"If I had time I would help you", he:"אם היה לי זמן הייתי עוזר לך", level:3 },
-  { id:"s11", answer:"She asked me where the library was", he:"היא שאלה אותי איפה הספרייה", level:3 },
-  { id:"s12", answer:"You should drink more water in the summer", he:"כדאי לך לשתות יותר מים בקיץ", level:3 },
+  // רמה 1
+  { id:"s1",  answer:"I like pizza", he:"אני אוהב פיצה", level:1, tip:"מתחילים בנושא — מי אוהב? — ואז הפועל." },
+  { id:"s2",  answer:"The dog is big", he:"הכלב גדול", level:1, tip:"באנגלית חייבים פועל גם כשבעברית אין: is באמצע." },
+  { id:"s3",  answer:"She has a cat", he:"יש לה חתול", level:1, tip:"באנגלית 'יש לה' = היא מחזיקה: נושא ← פועל ← ומה יש לה." },
+  { id:"s4",  answer:"We are good friends", he:"אנחנו חברים טובים", level:1, tip:"אחרי הנושא בא הפועל are." },
+  { id:"s5",  answer:"My brother plays football", he:"אח שלי משחק כדורגל", level:1, tip:"מתחילים במי שמשחק, ואז מה הוא עושה." },
+  { id:"s6",  answer:"I am twelve years old", he:"אני בן/בת שתים עשרה", level:1, tip:"באנגלית אומרים 'אני נמצא... שנים' — מתחילים ב-I am." },
+  { id:"s7",  answer:"The cat sleeps on the bed", he:"החתול ישן על המיטה", level:1, tip:"נושא ← פועל ← ואיפה זה קורה בא בסוף." },
+  { id:"s8",  answer:"We watch TV at night", he:"אנחנו רואים טלוויזיה בלילה", level:1, tip:"הזמן (מתי) בא בסוף המשפט." },
+  { id:"s9",  answer:"I have two sisters", he:"יש לי שתי אחיות", level:1, tip:"באנגלית 'יש לי' = I have." },
+  { id:"s10", answer:"The water is cold", he:"המים קרים", level:1, tip:"באנגלית חייבים פועל גם כשבעברית אין: is." },
+  { id:"s11", answer:"He likes computer games", he:"הוא אוהב משחקי מחשב", level:1, tip:"זכרו: אחרי He הפועל מקבל s בסוף." },
+  { id:"s12", answer:"School starts at eight", he:"בית הספר מתחיל בשמונה", level:1, tip:"נושא ← פועל ← והשעה בסוף." },
+  // רמה 2
+  { id:"s13", answer:"He plays soccer every day", he:"הוא משחק כדורגל כל יום", level:2, tip:"'כל יום' בא בסוף המשפט." },
+  { id:"s14", answer:"We went to the beach yesterday", he:"הלכנו לים אתמול", level:2, tip:"קודם מה עשינו ולאן, ו'מתי' בסוף." },
+  { id:"s15", answer:"Can I have some water please", he:"אפשר קצת מים בבקשה?", level:2, tip:"בקשה מנומסת מתחילה ב-Can, והנימוס בא בסוף." },
+  { id:"s16", answer:"He does not like cold weather", he:"הוא לא אוהב מזג אוויר קר", level:2, tip:"שלילה בהווה: does not נכנס לפני הפועל." },
+  { id:"s17", answer:"She is reading a new book", he:"היא קוראת עכשיו ספר חדש", level:2, tip:"הווה ממושך: is + פועל עם ing." },
+  { id:"s18", answer:"They are going to the mall", he:"הם הולכים לקניון", level:2, tip:"are לפני going, והמקום בסוף." },
+  { id:"s19", answer:"Do you want to play with us", he:"אתם רוצים לשחק איתנו?", level:2, tip:"שאלה בהווה מתחילה ב-Do." },
+  { id:"s20", answer:"I forgot my homework at home", he:"שכחתי את שיעורי הבית בבית", level:2, tip:"נושא ← פועל בעבר ← מה ← ואיפה בסוף." },
+  { id:"s21", answer:"We will travel to Eilat next week", he:"ניסע לאילת בשבוע הבא", level:2, tip:"עתיד: will לפני הפועל, והזמן בסוף." },
+  { id:"s22", answer:"My phone is in my bag", he:"הטלפון שלי בתוך התיק שלי", level:2, tip:"גם כאן צריך is באמצע, לפני המיקום." },
+  { id:"s23", answer:"She always helps her little brother", he:"היא תמיד עוזרת לאח הקטן שלה", level:2, tip:"המילה always נכנסת לפני הפועל." },
+  { id:"s24", answer:"What time does the movie start", he:"באיזו שעה מתחיל הסרט?", level:2, tip:"שאלה מתחילה במילת השאלה, ואז does." },
+  // רמה 3
+  { id:"s25", answer:"I have been learning English for three years", he:"אני לומד אנגלית כבר שלוש שנים", level:3, tip:"have been + פועל עם ing, ומשך הזמן בסוף." },
+  { id:"s26", answer:"If I had time I would help you", he:"אם היה לי זמן הייתי עוזר לך", level:3, tip:"משפט תנאי: החלק שמתחיל ב-If בא קודם." },
+  { id:"s27", answer:"She asked me where the library was", he:"היא שאלה אותי איפה הספרייה", level:3, tip:"בשאלה עקיפה, אחרי where הסדר הוא כמו משפט רגיל." },
+  { id:"s28", answer:"You should drink more water in the summer", he:"כדאי לך לשתות יותר מים בקיץ", level:3, tip:"should בא אחרי הנושא ולפני הפועל." },
+  { id:"s29", answer:"I have never seen such a beautiful sunset", he:"מעולם לא ראיתי שקיעה כל כך יפה", level:3, tip:"never נכנס בין have לבין הפועל." },
+  { id:"s30", answer:"He told us that the test was easy", he:"הוא אמר לנו שהמבחן היה קל", level:3, tip:"מי אמר ← למי ← ואז that פותח את ההמשך." },
+  { id:"s31", answer:"We were playing outside when it started to rain", he:"שיחקנו בחוץ כשהתחיל לרדת גשם", level:3, tip:"הפעולה הארוכה (were playing) באה קודם, ואז when." },
+  { id:"s32", answer:"My parents want me to study harder", he:"ההורים שלי רוצים שאלמד יותר ברצינות", level:3, tip:"המבנה הוא: want + me + to + פועל." },
+  { id:"s33", answer:"This is the best movie I have ever watched", he:"זה הסרט הכי טוב שראיתי אי פעם", level:3, tip:"קודם 'זה הסרט הכי טוב', ואז מי ראה אותו." },
+  { id:"s34", answer:"She has lived in Haifa since she was five", he:"היא גרה בחיפה מאז שהייתה בת חמש", level:3, tip:"המילה since מחברת בין שני חלקי המשפט." },
+  { id:"s35", answer:"I will call you when I get home", he:"אתקשר אליך כשאגיע הביתה", level:3, tip:"אחרי when משתמשים בהווה, לא ב-will." },
+  { id:"s36", answer:"The teacher asked us to work in pairs", he:"המורה ביקשה מאיתנו לעבוד בזוגות", level:3, tip:"המבנה הוא: asked + us + to + פועל." },
 ];
 
 // איות: השלמת אות חסרה או זיהוי כתיב נכון
@@ -183,6 +210,7 @@ const DEFAULT_PROFILE = {
   dailyDoneDate: null,       // האם המשימה היומית הושלמה היום
   srs: {},                   // { wordId: { box, due } } — חזרה מרווחת
   recent: { vocab: [], grammar: [], reading: [], sentence: [], spelling: [] }, // ביצועים אחרונים לקושי דינמי
+  seen: { sentence: [] },    // פריטים שתורגלו לאחרונה — כדי שלא יחזרו על עצמם
   settings: { apiKey: "", sound: true },
 };
 
@@ -195,6 +223,7 @@ function loadProfile() {
     return { ...DEFAULT_PROFILE, ...saved,
       scores: { ...DEFAULT_PROFILE.scores, ...(saved.scores||{}) },
       recent: { ...DEFAULT_PROFILE.recent, ...(saved.recent||{}) },
+      seen: { ...DEFAULT_PROFILE.seen, ...(saved.seen||{}) },
       settings: { ...DEFAULT_PROFILE.settings, ...(saved.settings||{}) } };
   } catch (e) { return { ...DEFAULT_PROFILE }; }
 }
@@ -580,6 +609,18 @@ function SentenceBuilder({ item, onDone, sound }) {
   const [bank, setBank] = useState(() => shuffle(words.map((w, i) => ({ w, i }))));
   const [chosen, setChosen] = useState([]);
   const [result, setResult] = useState(null); // null | true | false
+  const [hintLevel, setHintLevel] = useState(0); // 0=אין, 1=הכוונה כללית, 2=הכוונה ממוקדת
+
+  // האם המילים שנבחרו עד כה נכונות לפי הסדר (בלי לחשוף את ההמשך)
+  const prefixOk = chosen.every((tok, i) => tok.w.toLowerCase() === words[i].toLowerCase());
+
+  // רמז מדורג: קודם הכוונה על המבנה, אחר כך כיוון ממוקד — אף פעם לא התשובה עצמה
+  function hintText() {
+    if (hintLevel === 1) return item.tip || "התחילו במי שעושה את הפעולה (הנושא), אחריו הפועל, והפרטים בסוף.";
+    if (!prefixOk) return "🔍 משהו בהתחלה לא במקום — הקישו על מילה שבחרתם כדי להחזיר אותה, ובדקו שוב.";
+    if (chosen.length >= words.length) return "כל המילים במקום — בדקו שהסדר הגיוני.";
+    return `כיוון: המילה הבאה מתחילה באות "${words[chosen.length][0].toUpperCase()}".`;
+  }
 
   function pick(tok) {
     if (result !== null) return;
@@ -619,6 +660,21 @@ function SentenceBuilder({ item, onDone, sound }) {
             className="px-3 py-2 bg-white border-2 border-slate-200 rounded-xl font-semibold text-lg shadow-sm no-select active:scale-95">{tok.w}</button>
         ))}
       </div>
+      {result === null && (
+        <div className="text-center mt-3">
+          {hintLevel < 2 && (
+            <button onClick={() => setHintLevel(h => h + 1)}
+              className="text-sm font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-4 py-2 active:scale-95">
+              {hintLevel === 0 ? "💡 רמז" : "💡 עוד רמז"}
+            </button>
+          )}
+          {hintLevel > 0 && (
+            <div className="mt-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 slide-in leading-relaxed">
+              {hintText()}
+            </div>
+          )}
+        </div>
+      )}
       {result === false && (
         <div className="text-center mt-3 slide-in">
           <span className="text-slate-500 text-sm">המשפט הנכון: </span>
@@ -1079,7 +1135,15 @@ function SentenceActivity({ profile, onFinish, onBack }) {
   const SESSION_SIZE = 5;
   const [items] = useState(() => {
     const lvl = dynamicLevel(profile, "sentence", []);
-    return shuffle(SENTENCES.filter(s => Math.abs(s.level - lvl) <= 1)).slice(0, SESSION_SIZE);
+    const pool = SENTENCES.filter(s => Math.abs(s.level - lvl) <= 1);
+    // קודם משפטים שעוד לא תורגלו לאחרונה — כדי שלא יחזרו על עצמם
+    const seenIds = new Set(profile.seen?.sentence || []);
+    const fresh = shuffle(pool.filter(s => !seenIds.has(s.id)));
+    const picked = fresh.slice(0, SESSION_SIZE);
+    if (picked.length < SESSION_SIZE) {
+      picked.push(...shuffle(pool.filter(s => seenIds.has(s.id))).slice(0, SESSION_SIZE - picked.length));
+    }
+    return picked;
   });
   const [idx, setIdx] = useState(0);
   const [results, setResults] = useState([]);
@@ -1090,7 +1154,7 @@ function SentenceActivity({ profile, onFinish, onBack }) {
     setResults(newResults);
     if (idx + 1 >= items.length) {
       const xp = newResults.filter(Boolean).length * 14 + 5;
-      onFinish("sentence", newResults, xp);
+      onFinish("sentence", newResults, xp, null, { domain: "sentence", ids: items.map(it => it.id) });
     } else setIdx(i => i + 1);
   }
 
@@ -1413,10 +1477,15 @@ function App() {
   }
 
   // סיום פעילות: עדכון פרופיל + מסך סיכום
-  function finishSession(domain, results, xp, srsUpdates) {
+  function finishSession(domain, results, xp, srsUpdates, seenInfo) {
     setProfile(p => {
       let updated = applySessionToProfile(p, domain, results, xp, isDailySession);
       if (srsUpdates) updated = { ...updated, srs: { ...updated.srs, ...srsUpdates } };
+      // זיכרון פריטים שתורגלו — שומרים את 28 האחרונים כדי למנוע חזרות
+      if (seenInfo) {
+        const prev = (updated.seen && updated.seen[seenInfo.domain]) || [];
+        updated = { ...updated, seen: { ...updated.seen, [seenInfo.domain]: [...prev, ...seenInfo.ids].slice(-28) } };
+      }
       return updated;
     });
     setXpFloat(xp);
