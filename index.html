@@ -584,7 +584,8 @@ function DiagnosticScreen({ onComplete, sound }) {
             <div className="en text-2xl font-bold text-center bg-white rounded-2xl py-5 px-4 mb-5 shadow-sm border border-slate-100">{question.enText}</div>
           )}
           {question.sentence ? (
-            <SentenceBuilder item={question.sentence} onDone={recordAnswer} sound={sound} hideFeedbackDelay />
+            // key לפי מזהה השאלה — מאפס את לוח המילים כשעוברים לשאלת משפט חדשה
+            <SentenceBuilder key={question.id} item={question.sentence} onDone={recordAnswer} sound={sound} />
           ) : (
             <div className="space-y-3">
               {question.options.map(o => (
