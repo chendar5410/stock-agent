@@ -557,3 +557,118 @@ document.addEventListener("DOMContentLoaded", () => {
   const activePanel = document.querySelector(".panel.active");
   if (activePanel?.id === "panel-watchlist") loadWatchlistRanked();
 });
+
+// ── EQUITY DECK ──────────────────────────────────────────────────────────
+const deckForm     = document.getElementById("deck-form");
+const deckCompany  = document.getElementById("deck-company");
+const deckTicker   = document.getElementById("deck-ticker");
+const deckFiles    = document.getElementById("deck-files");
+const deckSubmit   = document.getElementById("deck-submit");
+const deckStatus   = document.getElementById("deck-status");
+const deckResult   = document.getElementById("deck-result");
+const deckJobId    = document.getElementById("deck-job-id");
+const deckStage    = document.getElementById("deck-stage");
+const deckDocs     = document.getElementById("deck-docs");
+const deckDownloadRow = document.getElementById("deck-download-row");
+const deckDownload = document.getElementById("deck-download");
+
+let deckPollTimer = null;
+
+function deckResetUI() {
+  deckResult.style.display = "none";
+  deckDownloadRow.style.display = "none";
+  deckJobId.textContent = "";
+  deckStage.textContent = "";
+  deckDocs.textContent = "";
+  deckDownload.removeAttribute("href");
+  hideStatus(deckStatus);
+  if (deckPollTimer) {
+    clearTimeout(deckPollTimer);
+    deckPollTimer = null;
+  }
+}
+
+deckForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  deckResetUI();
+
+  const company = deckCompany.value.trim();
+  const ticker = deckTicker.value.trim().toUpperCase();
+  if (!company) {
+    showStatus(deckStatus, "error", "Company name is required.");
+    return;
+  }
+  if (!ticker) {
+    showStatus(deckStatus, "error", "Ticker is required.");
+    return;
+  }
+  if (!deckFiles.files || deckFiles.files.length === 0) {
+    showStatus(deckStatus, "error", "Upload at least one PDF or transcript.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("company_name", company);
+  formData.append("ticker", ticker);
+  for (const f of deckFiles.files) {
+    formData.append("files", f);
+  }
+
+  deckSubmit.disabled = true;
+  showStatus(deckStatus, "loading", "Uploading documents and starting the agent…");
+
+  let body;
+  try {
+    const r = await fetch("/api/deck/generate", { method: "POST", body: formData });
+    body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      throw new Error(body.detail || `HTTP ${r.status}`);
+    }
+  } catch (err) {
+    deckSubmit.disabled = false;
+    showStatus(deckStatus, "error", err.message);
+    return;
+  }
+
+  deckJobId.textContent = body.job_id;
+  deckDocs.textContent = (body.documents || [])
+    .map(d => `${d.name} (${d.kind}${d.pages ? `, ${d.pages}p` : ""})`)
+    .join(", ") || "—";
+  deckResult.style.display = "block";
+
+  pollDeckStatus(body.job_id);
+});
+
+async function pollDeckStatus(jobId) {
+  try {
+    const r = await fetch(`/api/deck/status/${jobId}`);
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
+
+    deckStage.textContent = body.message
+      ? `${body.status} — ${body.message}`
+      : body.status;
+
+    if (body.status === "done") {
+      deckDownloadRow.style.display = "flex";
+      deckDownload.href = body.download_url;
+      showStatus(deckStatus, "success",
+        `Deck ready in ${body.elapsed_s ?? "?"}s. Click "Download .pptx" below.`);
+      deckSubmit.disabled = false;
+      return;
+    }
+
+    if (body.status === "error") {
+      showStatus(deckStatus, "error", body.error || "Generation failed.");
+      deckSubmit.disabled = false;
+      return;
+    }
+
+    showStatus(deckStatus, "loading",
+      body.message || "Agent is working — this typically takes 30–90 seconds…");
+    deckPollTimer = setTimeout(() => pollDeckStatus(jobId), 2000);
+  } catch (err) {
+    showStatus(deckStatus, "error", err.message);
+    deckSubmit.disabled = false;
+  }
+}

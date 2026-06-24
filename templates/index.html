@@ -54,6 +54,7 @@
       <button class="active" data-panel="panel-single">Single Chart</button>
       <button data-panel="panel-compare">Compare</button>
       <button data-panel="panel-watchlist">Watchlist</button>
+      <button data-panel="panel-deck">Equity Deck</button>
     </nav>
   </header>
 
@@ -245,6 +246,67 @@
       </div>
 
     </div><!-- /panel-watchlist -->
+
+
+    <!-- ══════════════════════════════════════════════════════════════
+         PANEL: Equity Deck (LLM-powered fundamental-analysis deck)
+    ══════════════════════════════════════════════════════════════════ -->
+    <div id="panel-deck" class="panel">
+
+      <div class="deck-intro">
+        <h2>Generate a Study-Grade Fundamental Analysis Deck</h2>
+        <p>
+          Upload one or more <strong>PDFs</strong> (10-K, 10-Q, annual report)
+          or <strong>text transcripts</strong> (earnings call) for a single
+          company. The agent runs a senior-equity-strategist + finance-educator
+          prompt against the documents and returns a 28–34 slide PowerPoint
+          covering business, financials, returns, valuation, risk, and a
+          self-assessment quiz.
+        </p>
+      </div>
+
+      <form id="deck-form" class="controls" autocomplete="off">
+        <div class="ctrl-group">
+          <label for="deck-company">Company name</label>
+          <input id="deck-company" type="text" placeholder="e.g. Costco Wholesale" required style="min-width:240px" />
+        </div>
+        <div class="ctrl-group">
+          <label for="deck-ticker">Ticker</label>
+          <input id="deck-ticker" type="text" placeholder="e.g. COST" maxlength="10" required />
+        </div>
+        <div class="ctrl-group" style="flex:1;min-width:260px">
+          <label for="deck-files">Documents (PDF / .txt / .md)</label>
+          <input id="deck-files" type="file" multiple accept=".pdf,.txt,.md,.markdown" required />
+        </div>
+        <div class="ctrl-group" style="justify-content:flex-end">
+          <button type="submit" class="btn" id="deck-submit">Generate Deck</button>
+        </div>
+      </form>
+
+      <div id="deck-status" class="status"></div>
+
+      <div id="deck-result" class="deck-result" style="display:none">
+        <div class="deck-result-row">
+          <span class="deck-label">Job</span>
+          <span id="deck-job-id" class="deck-val mono"></span>
+        </div>
+        <div class="deck-result-row">
+          <span class="deck-label">Stage</span>
+          <span id="deck-stage" class="deck-val"></span>
+        </div>
+        <div class="deck-result-row">
+          <span class="deck-label">Documents</span>
+          <span id="deck-docs" class="deck-val"></span>
+        </div>
+        <div class="deck-result-row" id="deck-download-row" style="display:none">
+          <span class="deck-label">Result</span>
+          <span class="deck-val">
+            <a id="deck-download" class="btn" href="#" download>Download .pptx</a>
+          </span>
+        </div>
+      </div>
+
+    </div><!-- /panel-deck -->
 
   </main>
 </div>
