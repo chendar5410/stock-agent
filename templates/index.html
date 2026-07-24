@@ -55,6 +55,7 @@
       <button data-panel="panel-compare">Compare</button>
       <button data-panel="panel-watchlist">Watchlist</button>
     </nav>
+    <button id="aod-toggle" class="aod-toggle" title="Always On Display">◐ Always On</button>
   </header>
 
   <!-- ── main ──────────────────────────────────────────────────────── -->
@@ -249,6 +250,17 @@
   </main>
 </div>
 
-<script src="/static/js/app.js?v=5"></script>
+<!-- ── Always On Display overlay ────────────────────────────────────────
+     Software approximation of iPhone's Always-On Display for iPad Pro:
+     dimmed, low-contrast full-screen view + Screen Wake Lock so the
+     iPad doesn't auto-sleep while showing live watchlist data. -->
+<div id="aod-overlay" class="aod-overlay" aria-hidden="true">
+  <div class="aod-clock" id="aod-clock">--:--</div>
+  <div class="aod-date" id="aod-date">—</div>
+  <div class="aod-list" id="aod-list"></div>
+  <div class="aod-hint">Tap anywhere to exit</div>
+</div>
+
+<script src="/static/js/app.js?v=6"></script>
 </body>
 </html>

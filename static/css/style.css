@@ -305,3 +305,78 @@ input[type="text"] { min-width: 140px; }
   header { padding: 10px 12px; }
   .controls { flex-direction: column; }
 }
+
+/* ── Always On Display ───────────────────────────────────────────────── */
+.aod-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.aod-toggle:hover { background: var(--surface2); color: var(--text); }
+.aod-toggle.on { color: var(--accent); border-color: var(--accent); }
+
+.aod-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #000;
+  color: #6e7681;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.aod-overlay.visible { display: flex; }
+
+.aod-clock {
+  font-size: clamp(48px, 14vw, 120px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #8b949e;
+  letter-spacing: 0.02em;
+}
+.aod-date {
+  font-size: clamp(13px, 2vw, 18px);
+  color: #4d545c;
+  margin-bottom: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.aod-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 90vw;
+}
+.aod-list .aod-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  font-size: clamp(14px, 2.2vw, 20px);
+  font-variant-numeric: tabular-nums;
+}
+.aod-list .aod-symbol { color: #6e7681; font-weight: 600; }
+.aod-list .aod-z { color: #3a3f45; }
+.aod-list .aod-z.cheap { color: #1f4d2e; }
+.aod-list .aod-z.expensive { color: #4d2a20; }
+.aod-list .aod-empty { color: #3a3f45; font-size: 13px; text-align: center; }
+
+.aod-hint {
+  position: absolute;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  font-size: 11px;
+  color: #2b2f34;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}

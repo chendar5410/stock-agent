@@ -557,3 +557,104 @@ document.addEventListener("DOMContentLoaded", () => {
   const activePanel = document.querySelector(".panel.active");
   if (activePanel?.id === "panel-watchlist") loadWatchlistRanked();
 });
+
+// ── ALWAYS ON DISPLAY ────────────────────────────────────────────────────
+// Software approximation of iPhone's Always-On Display: a dimmed,
+// low-contrast full-screen view of the watchlist, combined with the
+// Screen Wake Lock API so the iPad doesn't auto-lock while it's showing.
+// There is no web API to control real hardware always-on/AOD brightness —
+// this keeps the screen awake and renders a deliberately dim UI instead.
+const aodToggleBtn = document.getElementById("aod-toggle");
+const aodOverlay    = document.getElementById("aod-overlay");
+const aodClockEl    = document.getElementById("aod-clock");
+const aodDateEl     = document.getElementById("aod-date");
+const aodListEl     = document.getElementById("aod-list");
+
+let aodActive       = false;
+let aodClockTimer   = null;
+let aodDataTimer    = null;
+let wakeLockSentinel = null;
+
+async function requestWakeLock() {
+  if (!("wakeLock" in navigator)) return;
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request("screen");
+  } catch (err) {
+    console.warn("Wake Lock request failed:", err.message);
+  }
+}
+
+async function releaseWakeLock() {
+  if (wakeLockSentinel) {
+    try { await wakeLockSentinel.release(); } catch (_) { /* already released */ }
+    wakeLockSentinel = null;
+  }
+}
+
+function updateAODClock() {
+  const now = new Date();
+  aodClockEl.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  aodDateEl.textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+}
+
+async function refreshAODList() {
+  try {
+    const data = await apiFetch(API.wlRank(wlMetric.value, wlPeriod.value));
+    const rows = (data.ranked || []).slice(0, 6);
+    if (!rows.length) {
+      aodListEl.innerHTML = `<div class="aod-empty">Add tickers to your watchlist to see them here</div>`;
+      return;
+    }
+    aodListEl.innerHTML = rows.map(r => {
+      const zc = r.zscore < -1 ? "cheap" : r.zscore > 1 ? "expensive" : "";
+      return `
+        <div class="aod-row">
+          <span class="aod-symbol">${r.symbol}</span>
+          <span>${fmt(r.current)}x</span>
+          <span class="aod-z ${zc}">${r.zscore > 0 ? "+" : ""}${fmt(r.zscore, 2)}σ</span>
+        </div>`;
+    }).join("");
+  } catch (err) {
+    aodListEl.innerHTML = `<div class="aod-empty">Watchlist unavailable</div>`;
+  }
+}
+
+function enterAOD() {
+  aodActive = true;
+  aodOverlay.classList.add("visible");
+  aodOverlay.setAttribute("aria-hidden", "false");
+  aodToggleBtn.classList.add("on");
+
+  updateAODClock();
+  refreshAODList();
+  aodClockTimer = setInterval(updateAODClock, 1000);
+  aodDataTimer = setInterval(refreshAODList, 60000);
+
+  requestWakeLock();
+}
+
+function exitAOD() {
+  aodActive = false;
+  aodOverlay.classList.remove("visible");
+  aodOverlay.setAttribute("aria-hidden", "true");
+  aodToggleBtn.classList.remove("on");
+
+  clearInterval(aodClockTimer);
+  clearInterval(aodDataTimer);
+  aodClockTimer = null;
+  aodDataTimer = null;
+
+  releaseWakeLock();
+}
+
+aodToggleBtn.addEventListener("click", () => (aodActive ? exitAOD() : enterAOD()));
+aodOverlay.addEventListener("click", exitAOD);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && aodActive) exitAOD();
+});
+
+// Re-acquire the wake lock when the tab/app regains visibility — the OS
+// releases it automatically whenever the page is backgrounded.
+document.addEventListener("visibilitychange", () => {
+  if (aodActive && document.visibilityState === "visible") requestWakeLock();
+});
